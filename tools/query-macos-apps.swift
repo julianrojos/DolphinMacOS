@@ -8,6 +8,9 @@ struct App: Codable {
 }
 struct Result: Codable {
     let contentType: String
+    let isDynamic: Bool
+    let families: [String]
+    let preferredMIMEType: String?
     let applications: [App]
     let defaultBundleID: String?
 }
@@ -23,7 +26,9 @@ for ext in CommandLine.arguments.dropFirst() {
         return App(bundleID: id, name: name, path: url.path)
     }
     let defaultID = workspace.urlForApplication(toOpen: type).flatMap { Bundle(url: $0)?.bundleIdentifier }
-    results[ext] = Result(contentType: type.identifier, applications: apps, defaultBundleID: defaultID)
+    let families = [("text", UTType.text), ("image", UTType.image), ("audio", UTType.audio), ("video", UTType.movie)]
+        .filter { type.conforms(to: $0.1) }.map { $0.0 }
+    results[ext] = Result(contentType: type.identifier, isDynamic: type.isDynamic, families: families, preferredMIMEType: type.preferredMIMEType, applications: apps, defaultBundleID: defaultID)
 }
 let encoder = JSONEncoder()
 encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
