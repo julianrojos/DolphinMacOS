@@ -122,7 +122,7 @@ def deploy(craft, store, artifact, managed, state_path, state, validate=lambda: 
     before_key = store.save(craft, before)
     pending = state_path.parent / "pendiente.json"
     prior_state = read_json(state_path) if state_path.exists() else None
-    write_json(pending, {"before": before_key, "managed": managed, "prior_state": prior_state})
+    write_json(pending, {"before": before_key, "target": artifact, "managed": managed, "prior_state": prior_state})
     try:
         put_tree(craft, tree, manifest, managed)
         verify_live(craft, manifest, managed)
@@ -145,11 +145,21 @@ def deploy(craft, store, artifact, managed, state_path, state, validate=lambda: 
 def recover(craft, store, state_path):
     pending = state_path.parent / "pendiente.json"
     data = read_json(pending)
-    if set(data) != {"before", "managed", "prior_state"} or not isinstance(data["managed"], list):
+    if set(data) not in ({"before", "managed", "prior_state"}, {"before", "target", "managed", "prior_state"}) or not isinstance(data["managed"], list):
         raise RuntimeError("Registro de recuperación incompleto.")
     tree, manifest = store.load(data["before"])
     if set(data["managed"]) != set(manifest):
         raise RuntimeError("La lista de archivos de recuperación no coincide con la copia.")
+    target_manifest = store.load(data["target"])[1] if "target" in data else None
+    for relative in data["managed"]:
+        current = describe(safe_path(craft, relative))
+        allowed = [manifest.get(relative)]
+        if target_manifest is not None:
+            allowed.append(target_manifest.get(relative))
+        if current not in allowed:
+            if target_manifest is None:
+                raise RuntimeError(f"El registro de recuperación es antiguo y no identifica el destino; {relative} difiere de la copia anterior. Conserva el registro pendiente y revisa el archivo antes de continuar.")
+            raise RuntimeError(f"La recuperación detectó un cambio externo en {relative}; conserva el registro pendiente y revisa el archivo antes de continuar.")
     put_tree(craft, tree, manifest, data["managed"])
     if data["prior_state"] is not None:
         write_json(state_path, data["prior_state"])
