@@ -14,8 +14,13 @@ Adaptación local del gestor de archivos de KDE: https://invent.kde.org/system/d
   independiente en `run/`. Detecta si el proceso termina en los dos primeros
   segundos; que siga activo no demuestra que haya una ventana funcional.
 - La versión se define en `dolphin-version.json`. Los scripts comprueban el
-  ejecutable antes de modificarlo. Cambiar la versión exige validar también el
-  parche: una versión aún no adaptada se rechaza explícitamente.
+  ejecutable antes de modificarlo. Cambiar la versión exige validar también los
+  parches: una versión sin `patches/<versión>/` se rechaza explícitamente.
+- Los parches están en `patches/<versión>/`, uno por corrección, y se aplican en
+  orden de nombre (`0001-…`, `0002-…`). Cada uno se comprueba por separado: unas
+  fuentes preparadas con un conjunto anterior solo reciben los que faltan, y al
+  generar la versión sin parche se retiran en orden inverso. Una corrección
+  nueva se añade como un archivo nuevo, sin modificar los existentes.
 
 ## Parche, metadatos y recuperación
 
@@ -119,7 +124,7 @@ Los errores técnicos del instalador y los metadatos se guardan en
 - `./comprobar-kio.sh` copia archivos y carpetas, rechaza un conflicto sin alterar
   el destino, mueve, envía a `trash:/` y restaura un archivo temporal propio,
   verificando ruta y contenido. No vacía ninguna papelera.
-- `python3 -m unittest discover -s tests -p 'test_*.py'` pasa veinticinco pruebas de
+- `python3 -m unittest discover -s tests -p 'test_*.py'` pasa veintisiete pruebas de
   instalación, errores claros de JSON/configuración, copias dañadas, metadatos,
   cambios del ejecutable, reversión por fallo y recuperación de una interrupción.
   La preparación inicial con Craft se simula; el despliegue completo y la
@@ -128,7 +133,13 @@ Los errores técnicos del instalador y los metadatos se guardan en
   comparar el plan con lo borrado, proteger copias iniciales y comprobar la
   reinstalación tras cambios externos y el archivo de configuraciones CMake.
   También cubren procesos con rutas absolutas, relativas y nombre de ejecutable,
-  y que abrir Dolphin durante la compilación impide el despliegue.
+  y que abrir Dolphin durante la compilación impide el despliegue. Para los
+  parches comprueban activar y retirar el conjunto, actualizar fuentes que solo
+  tienen los primeros parches y detenerse ante fuentes que no coinciden.
+  `tests/comprobar-accesibilidad.py` compila y ejecuta el `rowCount()` corregido
+  (parche 0001). Las correcciones de conversión de interfaces (0002) y de vida
+  del temporizador (0003) no tienen pruebas automáticas de ejecución: se han
+  validado a mano (ver Incidencias).
 
 ## Incidencias investigadas
 
@@ -148,15 +159,42 @@ Los errores técnicos del instalador y los metadatos se guardan en
   había menos elementos que columnas. Tras reiniciar el proceso no apareció esa
   excepción en el registro nuevo, pero la herramienta de accesibilidad continuó
   agotando el tiempo. El cierre inesperado sigue pendiente de validación real.
+- Cierres al usar Dolphin con Bartender 6 y Raycast abiertos (programas que leen
+  la interfaz de otras aplicaciones mediante accesibilidad):
+  - Al arrastrar la ventana o abrir un menú: `static_cast` a
+    `KItemListViewAccessible` de una interfaz que en macOS no lo era. Corregido
+    en `0002-accessibility-interface-cast.patch` con `dynamic_cast`.
+  - Al pulsar "Ordenar por": el temporizador de anuncios, propiedad de la vista,
+    se disparaba tras destruirse la interfaz de accesibilidad que captura.
+    Corregido en `0003-accessibility-timer-lifetime.patch`.
+  - Al abrir el menú contextual: fallo de memoria en Qt/AppKit al liberar un
+    `NSTextField` durante `QMenu::exec`. No corregido. No se reprodujo con
+    Bartender y Raycast cerrados, ni con solo Bartender abierto (menú
+    contextual, "Ordenar por" y arrastrar la ventana). Todo apunta a Raycast;
+    no se ha confirmado con solo Raycast abierto porque no se usa. Si se
+    vuelve a usar Raycast, mantenerlo cerrado mientras se usa Dolphin.
+  Validado a mano: tras cada corrección, el cierre correspondiente no se repitió.
 - KIO advierte que `/System/Volumes/Data/.Trashes` no pasa sus comprobaciones.
   La prueba de restauración pasó en el disco principal; esto no demuestra
-  integración con la papelera de Finder ni con discos externos.
+  integración con discos externos.
+- La papelera de Dolphin (KIO) vive en `~/.Trash/KDE.trash/`, con el formato de
+  Linux (`files/` e `info/*.trashinfo`). Finder solo muestra la carpeta
+  `KDE.trash` y no puede devolver los archivos; Dolphin sí los restaura.
+  Vaciar la papelera desde Finder también borra `KDE.trash`. Lo borrado desde
+  Finder no aparece en la papelera de Dolphin.
+
+## Fase 2: resultados (2026-11-06, sin Raycast abierto)
+
+Funcionan: navegación, pestañas (se ven pequeñas), vista dividida, copiar,
+pegar, mover arrastrando, renombrar, duplicar, crear carpeta, enviar a la
+papelera y restaurar desde Dolphin.
 
 ## Pendiente de validar
 
-- Navegación, pestañas, vista dividida y estabilidad de la interfaz tras reiniciar.
-- Visibilidad y restauración desde Finder de un archivo enviado a la papelera por
-  Dolphin. Repetir con un archivo temporal en un disco externo disponible.
+- Estabilidad de la interfaz en un uso más largo.
+- El registro muestra `mimeType "text/plain" not found`: Dolphin no encuentra la
+  base de datos de tipos MIME, lo que afecta, por ejemplo, a "Abrir con".
+- Papelera en un disco externo, con un archivo temporal creado en ese disco.
 - Descarga y preparación desde cero en un entorno vacío y acceso desde el Dock.
 - Si conviene corregir o retirar el servicio de launchd instalado por Craft.
 
