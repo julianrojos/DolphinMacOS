@@ -59,6 +59,8 @@ if ! craft --install-deps dolphin > "$LOGS/craft-dolphin.log" 2>&1; then
     fi
 fi
 
+"$ROOT/fix-dbus-service.sh"
+
 # Solo las dependencias usan la caché. El instalador compila y despliega todo
 # Dolphin; no mezcla una biblioteca local con ejecutables de la caché.
 SOURCE="$CRAFT_ROOT/build/kde/applications/dolphin/work/dolphin-$VERSION"

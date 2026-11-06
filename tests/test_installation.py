@@ -122,6 +122,13 @@ class InstallationTests(unittest.TestCase):
             self.assertEqual((self.craft / installer.INFO_PATH).read_bytes(), original)
         self.assertEqual(read_json(self.state_path)["baseline"], state["baseline"])
 
+    def test_metadata_points_dock_launches_at_craft_data(self):
+        tree = self.tree("metadata", b"x")
+        installer.set_metadata(tree, self.settings.version, installer.data_dirs(self.settings))
+        data = plistlib.loads((tree / installer.INFO_PATH).read_bytes())
+        self.assertEqual(data["CFBundleIdentifier"], "org.kde.dolphin")
+        self.assertEqual(data["LSEnvironment"], {"QT_DATA_DIRS": str(self.craft / "share")})
+
     def test_complete_restore_uses_unpatched_source_artifact(self):
         _, baseline, _ = self.managed_install()
         with patch.object(installer, "load", return_value=self.settings), patch.object(installer, "run"), patch.object(installer, "check_version"):
@@ -236,6 +243,10 @@ craft() {
 }
 ''')
         (self.root / "parchear-dolphin.py").write_text('from pathlib import Path\np=Path(__file__).parent\nassert (p/"CraftRoot/build/kde/applications/dolphin/work/build/CMakeCache.txt").exists()\n(p/"complete-install-called").touch()\n')
+        # Stub: the real script reloads the launchd D-Bus agent.
+        dbus_fix = self.root / "fix-dbus-service.sh"
+        dbus_fix.write_text('#!/bin/zsh\ntouch "${0:A:h}/dbus-fix-called"\n')
+        dbus_fix.chmod(0o755)
         self.settings.build.mkdir(parents=True)
         (self.settings.build / "CMakeCache.txt").write_text("CMAKE_HOME_DIRECTORY:INTERNAL=/previous/source\n")
         result = subprocess.run(["zsh", str(self.root / "setup.sh")], capture_output=True, text=True)
@@ -246,6 +257,7 @@ craft() {
         for action in ("fetch", "unpack", "configure"):
             self.assertIn(f"--no-cache --{action} dolphin", actions)
         self.assertTrue((self.root / "complete-install-called").exists())
+        self.assertTrue((self.root / "dbus-fix-called").exists())
         archived = list((self.root / "bootstrap").glob("build-anterior.*/build/CMakeCache.txt"))
         self.assertEqual(len(archived), 1)
         self.assertIn("/previous/source", archived[0].read_text())

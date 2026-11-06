@@ -54,13 +54,21 @@ def load_state(settings):
     return data
 
 
-def set_metadata(tree, version):
+def data_dirs(settings):
+    """Extra Qt data dirs (MIME database) for Craft's Qt on macOS."""
+    return [settings.craft / "share"]
+
+
+def set_metadata(tree, version, dirs):
     info = tree / INFO_PATH
     with info.open("rb") as stream:
         data = plistlib.load(stream)
     data.update(CFBundleIdentifier="org.kde.dolphin", CFBundleName="Dolphin",
                 CFBundleDisplayName="Dolphin", CFBundleShortVersionString=version,
-                CFBundleVersion=version)
+                CFBundleVersion=version,
+                # Launches from the Dock/Finder get no shell environment: let
+                # Craft's Qt find the MIME database and application definitions.
+                LSEnvironment={"QT_DATA_DIRS": ":".join(str(d) for d in dirs)})
     with info.open("wb") as stream:
         plistlib.dump(data, stream)
 
@@ -121,7 +129,7 @@ def build_artifact(settings, store, patched):
             if not (tree / INFO_PATH).is_file() or not any((tree / "plugins").rglob("*.so")):
                 raise RuntimeError(f"Instalación completa no generada; consulta {log}")
             if patched:
-                set_metadata(tree, settings.version)
+                set_metadata(tree, settings.version, data_dirs(settings))
             sign_tree(tree)
             return store.save(tree)
 
@@ -190,7 +198,7 @@ def main(argv=None):
                     if args.restaurar_metadatos:
                         shutil.copy2(base_tree / INFO_PATH, tree / INFO_PATH)
                     else:
-                        set_metadata(tree, settings.version)
+                        set_metadata(tree, settings.version, data_dirs(settings))
                     sign_tree(tree)
                     target = store.save(tree)
         else:

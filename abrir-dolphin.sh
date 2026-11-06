@@ -28,6 +28,9 @@ if (( $# > 1 )) || { (( $# == 1 )) && [[ ! -d "$1" ]]; }; then
 fi
 
 mkdir -p "$RUN_DIR"
+# Craft's Qt reads extra data dirs (MIME database, application definitions)
+# from QT_DATA_DIRS on macOS; XDG_DATA_DIRS is ignored there.
+export QT_DATA_DIRS="$CRAFT_ROOT/share${QT_DATA_DIRS:+:$QT_DATA_DIRS}"
 log_file="$(mktemp "$RUN_DIR/dolphin.log.XXXXXXXX")"
 nohup "$SESSION" --dbus-daemon="$DAEMON" --config-file="$CONFIG" -- \
     "$APP" "${1:-$HOME}" > "$log_file" 2>&1 &
