@@ -31,7 +31,11 @@ class Settings:
     @property
     def build(self): return self.work / "build"
     @property
-    def patch(self): return self.root / f"patches/dolphin-{self.version}-accesibilidad.patch"
+    def patch_dir(self): return self.root / "patches" / self.version
+    @property
+    def patches(self):
+        # One patch per fix, applied in file name order (0001-..., 0002-...).
+        return sorted(self.patch_dir.glob("*.patch")) if self.patch_dir.is_dir() else []
     @property
     def backups(self): return self.root / "backups" / self.version
     @property
@@ -44,7 +48,7 @@ def load(root=None):
     if not isinstance(version, str) or not re.fullmatch(r"\d+\.\d+\.\d+", version):
         raise RuntimeError("La versión debe tener el formato mayor.menor.parche.")
     settings = Settings(root, version)
-    if not settings.patch.is_file():
+    if not settings.patches:
         raise RuntimeError(f"La versión {version} no tiene un parche validado.")
     return settings
 

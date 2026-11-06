@@ -141,23 +141,74 @@ class InstallationTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "Versión instalada inesperada"):
                 check_version(Path("fake"), self.settings.version)
 
-    def test_patch_toggling_does_not_guess_direction(self):
+    def copy_patches(self):
+        shutil.copytree(load().patch_dir, self.settings.patch_dir)
+
+    def copy_patched_sources(self):
+        """Copy every file touched by the patches; return their relative paths."""
         real = load()
-        filename = Path("src/kitemviews/accessibility/kitemlistviewaccessible.cpp")
-        destination = self.settings.source / filename
-        destination.parent.mkdir(parents=True)
-        shutil.copy2(real.source / filename, destination)
-        self.settings.patch.parent.mkdir()
-        shutil.copy2(real.patch, self.settings.patch)
+        filenames = sorted({Path(line[len("+++ b/"):].strip()) for patch_file in real.patches
+                            for line in patch_file.read_text().splitlines() if line.startswith("+++ b/")})
+        for filename in filenames:
+            destination = self.settings.source / filename
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(real.source / filename, destination)
+        self.copy_patches()
+        return filenames
+
+    def source_contents(self, filenames):
+        return {name: (self.settings.source / name).read_bytes() for name in filenames}
+
+    def test_patch_toggling_does_not_guess_direction(self):
+        filenames = self.copy_patched_sources()
+        self.assertGreater(len(self.settings.patches), 1)
         installer.ensure_patch(self.settings, False)
-        original = destination.read_bytes()
+        original = self.source_contents(filenames)
         installer.ensure_patch(self.settings, False)
-        self.assertEqual(destination.read_bytes(), original)
+        self.assertEqual(self.source_contents(filenames), original)
         installer.ensure_patch(self.settings, True)
-        modified = destination.read_bytes()
-        self.assertNotEqual(modified, original)
+        modified = self.source_contents(filenames)
+        for name in filenames:
+            self.assertNotEqual(modified[name], original[name])
         installer.ensure_patch(self.settings, True)
-        self.assertEqual(destination.read_bytes(), modified)
+        self.assertEqual(self.source_contents(filenames), modified)
+
+    def test_sources_with_an_earlier_patch_set_are_upgraded_and_reverted(self):
+        filenames = self.copy_patched_sources()
+        installer.ensure_patch(self.settings, False)
+        original = self.source_contents(filenames)
+        installer.ensure_patch(self.settings, True)
+        modified = self.source_contents(filenames)
+        for applied in range(1, len(self.settings.patches)):
+            with self.subTest(applied=applied):
+                installer.ensure_patch(self.settings, False)
+                # Sources prepared before the later fixes existed.
+                for patch_file in self.settings.patches[:applied]:
+                    subprocess.run(["patch", "--batch", "--forward", "-p1", "-i", str(patch_file)],
+                                   cwd=self.settings.source, check=True, capture_output=True)
+                partial = self.source_contents(filenames)
+                self.assertNotIn(partial, (original, modified))
+                installer.ensure_patch(self.settings, True)
+                self.assertEqual(self.source_contents(filenames), modified)
+                installer.ensure_patch(self.settings, False)
+                for patch_file in self.settings.patches[:applied]:
+                    subprocess.run(["patch", "--batch", "--forward", "-p1", "-i", str(patch_file)],
+                                   cwd=self.settings.source, check=True, capture_output=True)
+                installer.ensure_patch(self.settings, False)
+                self.assertEqual(self.source_contents(filenames), original)
+
+    def test_unknown_sources_stop_at_the_mismatching_patch(self):
+        filenames = self.copy_patched_sources()
+        installer.ensure_patch(self.settings, False)
+        target = self.settings.source / "src/kitemviews/kitemlistcontainer.cpp"
+        target.write_text(target.read_text().replace("setAccessibleFocusAndAnnounceAll", "renamedUpstream"))
+        before = self.source_contents(filenames)
+        with self.assertRaisesRegex(RuntimeError, "no coincide"):
+            installer.ensure_patch(self.settings, True)
+        # Earlier patches stay applied (a later run detects them), the mismatching
+        # patch and the ones after it are not applied.
+        changed = {name for name in filenames if self.source_contents(filenames)[name] != before[name]}
+        self.assertEqual(changed, {Path("src/kitemviews/accessibility/kitemlistviewaccessible.cpp")})
 
     def test_cli_configuration_errors_are_clear(self):
         for name in ("parchear-dolphin.py", "configurar-app.py", "limpiar-copias.py", "dolphin_config.py", "dolphin_install.py", "dolphin_store.py"):
@@ -172,8 +223,7 @@ class InstallationTests(unittest.TestCase):
     def test_setup_uses_cache_only_for_dependencies_and_installs_complete_build(self):
         for name in ("setup.sh", "dolphin_config.py", "dolphin-version.json"):
             shutil.copy2(ROOT / name, self.root / name)
-        self.settings.patch.parent.mkdir()
-        shutil.copy2(load().patch, self.settings.patch)
+        self.copy_patches()
         craft = self.craft / "craft"
         craft.mkdir()
         (craft / "craftenv.sh").write_text('''
@@ -359,8 +409,7 @@ craft() {
     def test_cli_manifest_errors_are_clear(self):
         for name in ("parchear-dolphin.py", "configurar-app.py", "dolphin_config.py", "dolphin_install.py", "dolphin_store.py", "dolphin-version.json"):
             shutil.copy2(ROOT / name, self.root / name)
-        self.settings.patch.parent.mkdir()
-        shutil.copy2(load().patch, self.settings.patch)
+        self.copy_patches()
         for content in ("{", "{}", '{"schema":2}'):
             self.state_path.write_text(content)
             for command in ("parchear-dolphin.py", "configurar-app.py"):

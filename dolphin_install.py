@@ -75,16 +75,32 @@ def sign_tree(tree):
         run("codesign", "--verify", app)
 
 
+def patch_applies(settings, patch, reverse):
+    command = ["patch", "--batch", "--forward", "--dry-run", "-p1", "-i", str(patch)]
+    if reverse:
+        command.insert(1, "-R")
+    return subprocess.run(command, cwd=settings.source, stdout=subprocess.DEVNULL,
+                          stderr=subprocess.DEVNULL).returncode == 0
+
+
 def ensure_patch(settings, enabled):
-    reverse = subprocess.run(["patch", "--batch", "--forward", "--dry-run", "-R", "-p1", "-i", str(settings.patch)],
-                             cwd=settings.source, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    if reverse.returncode == 0:
-        if not enabled:
-            run("patch", "--batch", "--forward", "-R", "-p1", "-i", settings.patch, cwd=settings.source)
-    else:
-        run("patch", "--batch", "--dry-run", "--forward", "-p1", "-i", settings.patch, cwd=settings.source)
-        if enabled:
-            run("patch", "--batch", "--forward", "-p1", "-i", settings.patch, cwd=settings.source)
+    # Each fix is a separate patch, so sources prepared with an earlier set of
+    # patches only need the missing ones applied (or the applied ones reverted).
+    # Apply in order and revert in reverse order, checking each one right before
+    # touching it so a patch may build on the ones before it.
+    patches = settings.patches if enabled else list(reversed(settings.patches))
+    if not patches:
+        raise RuntimeError(f"La versión {settings.version} no tiene un parche validado.")
+    for patch in patches:
+        if patch_applies(settings, patch, reverse=True):
+            if not enabled:
+                run("patch", "--batch", "--forward", "-R", "-p1", "-i", patch, cwd=settings.source)
+        elif patch_applies(settings, patch, reverse=False):
+            if enabled:
+                run("patch", "--batch", "--forward", "-p1", "-i", patch, cwd=settings.source)
+        else:
+            raise RuntimeError(f"El parche {patch.name} no coincide con las fuentes de Dolphin {settings.version}: "
+                               "no está ni aplicado ni pendiente.")
 
 
 def build_artifact(settings, store, patched):

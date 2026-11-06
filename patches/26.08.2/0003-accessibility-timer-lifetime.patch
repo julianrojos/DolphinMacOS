@@ -1,0 +1,43 @@
+--- a/src/kitemviews/accessibility/kitemlistviewaccessible.cpp
++++ b/src/kitemviews/accessibility/kitemlistviewaccessible.cpp
+@@ -46,6 +46,10 @@
+ 
+ KItemListViewAccessible::~KItemListViewAccessible()
+ {
++    // The timer belongs to the view and its timeout lambda captures this object:
++    // it must not outlive us (on macOS this interface can be deleted before the view).
++    delete m_announceCurrentItemTimer;
++
+     for (AccessibleIdWrapper idWrapper : std::as_const(m_accessibleDelegates)) {
+         if (idWrapper.isValid) {
+             QAccessible::deleteAccessibleInterface(idWrapper.id);
+@@ -458,12 +462,16 @@
+     m_shouldAnnounceLocation = true;
+ 
+     // Changes might still be happening in the view. We (re)start the timer to make it less likely that it announces a state that is still in flux.
+-    m_announceCurrentItemTimer->start();
++    if (m_announceCurrentItemTimer) {
++        m_announceCurrentItemTimer->start();
++    }
+ }
+ 
+ void KItemListViewAccessible::announceCurrentItem()
+ {
+-    m_announceCurrentItemTimer->start();
++    if (m_announceCurrentItemTimer) {
++        m_announceCurrentItemTimer->start();
++    }
+ }
+ 
+ void KItemListViewAccessible::slotAnnounceCurrentItemTimerTimeout()
+--- a/src/kitemviews/accessibility/kitemlistviewaccessible.h
++++ b/src/kitemviews/accessibility/kitemlistviewaccessible.h
+@@ -157,7 +157,7 @@
+      * If we announce the current item as soon as it changes, we would announce multiple items while loading a folder.
+      * This timer makes sure we only announce the singular currently focused item when things have settled down.
+      */
+-    QTimer *m_announceCurrentItemTimer;
++    QPointer<QTimer> m_announceCurrentItemTimer;
+ 
+     /**
+      * If we want announceCurrentItem() to always announce the current item, we must be aware if this is equal to the previous current item, because

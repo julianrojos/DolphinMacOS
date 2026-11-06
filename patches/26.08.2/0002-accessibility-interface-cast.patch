@@ -1,0 +1,27 @@
+--- a/src/kitemviews/kitemlistcontainer.cpp
++++ b/src/kitemviews/kitemlistcontainer.cpp
+@@ -211,7 +211,10 @@
+                 view->setFocus();
+             }
+ #ifndef QT_NO_ACCESSIBILITY
+-            static_cast<KItemListViewAccessible *>(QAccessible::queryAccessibleInterface(view))->setAccessibleFocusAndAnnounceAll();
++            // On macOS the interface may not be a KItemListViewAccessible.
++            if (auto accessible = dynamic_cast<KItemListViewAccessible *>(QAccessible::queryAccessibleInterface(view))) {
++                accessible->setAccessibleFocusAndAnnounceAll();
++            }
+ #endif
+         });
+     }
+--- a/src/kitemviews/kitemlistview.cpp
++++ b/src/kitemviews/kitemlistview.cpp
+@@ -1570,7 +1570,9 @@
+     }
+ #ifndef QT_NO_ACCESSIBILITY
+     if (current != previous && QAccessible::isActive()) {
+-        static_cast<KItemListViewAccessible *>(QAccessible::queryAccessibleInterface(this))->announceCurrentItem();
++        if (auto accessible = dynamic_cast<KItemListViewAccessible *>(QAccessible::queryAccessibleInterface(this))) {
++            accessible->announceCurrentItem();
++        }
+     }
+ #endif
+ }
