@@ -1,0 +1,82 @@
+--- a/src/kitemviews/accessibility/kitemlistviewaccessible.cpp
++++ b/src/kitemviews/accessibility/kitemlistviewaccessible.cpp
+@@ -89,7 +89,35 @@
+ 
+ QAccessibleInterface *KItemListViewAccessible::cellAt(int row, int column) const
+ {
+-    return accessibleDelegate(columnCount() * row + column);
++    const int count = view()->model()->count();
++    if (row < 0 || column < 0 || count <= 0) {
++        return nullptr;
++    }
++
++    // Use the positions the layouter gave to the items. A group header starts a new row, so the row
++    // of an item cannot be derived from its index. Items are ordered by row: search the first of them.
++    const KItemListViewLayouter *layouter = view()->m_layouter;
++    const bool vertical = layouter->scrollOrientation() == Qt::Vertical;
++    const int layoutRow = vertical ? row : column;
++    const int layoutColumn = vertical ? column : row;
++    const auto rowOf = [layouter, vertical](int index) {
++        return vertical ? layouter->itemRow(index) : layouter->itemColumn(index);
++    };
++    int low = 0;
++    int high = count;
++    while (low < high) {
++        const int middle = low + (high - low) / 2;
++        if (rowOf(middle) < layoutRow) {
++            low = middle + 1;
++        } else {
++            high = middle;
++        }
++    }
++    const int index = low + layoutColumn;
++    if (index >= count || rowOf(index) != layoutRow) {
++        return nullptr;
++    }
++    return accessibleDelegate(index);
+ }
+ 
+ QAccessibleInterface *KItemListViewAccessible::caption() const
+@@ -104,26 +132,28 @@
+ 
+ int KItemListViewAccessible::columnCount() const
+ {
+-    return view()->m_layouter->columnCount();
++    const int count = view()->model()->count();
++    if (count <= 0) {
++        return 0;
++    }
++    // The size of the table is what the layouter gave to the items, see cellAt().
++    const KItemListViewLayouter *layouter = view()->m_layouter;
++    const bool vertical = layouter->scrollOrientation() == Qt::Vertical;
++    // Asking for an item first makes sure the layout is up to date.
++    const int layoutRows = (vertical ? layouter->itemRow(count - 1) : layouter->itemColumn(count - 1)) + 1;
++    return vertical ? qMin(count, layouter->columnCount()) : layoutRows;
+ }
+ 
+ int KItemListViewAccessible::rowCount() const
+ {
+-    if (columnCount() <= 0) {
+-        return 0;
+-    }
+-
+-    int itemCount = view()->model()->count();
+-    int rowCount = itemCount / columnCount();
+-
+-    if (rowCount <= 0) {
++    const int count = view()->model()->count();
++    if (count <= 0) {
+         return 0;
+     }
+-
+-    if (itemCount % columnCount()) {
+-        ++rowCount;
+-    }
+-    return rowCount;
++    const KItemListViewLayouter *layouter = view()->m_layouter;
++    const bool vertical = layouter->scrollOrientation() == Qt::Vertical;
++    const int layoutRows = (vertical ? layouter->itemRow(count - 1) : layouter->itemColumn(count - 1)) + 1;
++    return vertical ? layoutRows : qMin(count, layouter->columnCount());
+ }
+ 
+ int KItemListViewAccessible::selectedCellCount() const

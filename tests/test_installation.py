@@ -91,11 +91,33 @@ class InstallationTests(unittest.TestCase):
         state, _, _ = self.managed_install()
         before = collect(self.craft)
         before_key = self.store.save(self.craft)
+        incoming = self.tree("interrupted-target", b"interrupted")
+        target_key = self.store.save(incoming)
         (self.craft / "plugins/plugin.so").write_bytes(b"interrupted")
-        write_json(self.settings.backups / "pendiente.json", dict(before=before_key, managed=state["managed"], prior_state=state))
+        write_json(self.settings.backups / "pendiente.json", dict(before=before_key, target=target_key, managed=state["managed"], prior_state=state))
         recover(self.craft, self.store, self.state_path)
         self.assertEqual(collect(self.craft), before)
         self.assertEqual(read_json(self.state_path), state)
+
+    def test_recovery_rejects_external_changes_without_partial_restore(self):
+        state, _, _ = self.managed_install()
+        before_key = self.store.save(self.craft)
+        target = self.tree("recovery-target", b"target")
+        target_key = self.store.save(target)
+        (self.craft / "plugins/plugin.so").write_bytes(b"external")
+        pending = self.settings.backups / "pendiente.json"
+        write_json(pending, dict(before=before_key, target=target_key, managed=state["managed"], prior_state=state))
+        before = collect(self.craft)
+        with self.assertRaisesRegex(RuntimeError, "cambio externo"):
+            recover(self.craft, self.store, self.state_path)
+        self.assertEqual(collect(self.craft), before)
+        self.assertTrue(pending.exists())
+        del_data = read_json(pending)
+        del del_data["target"]
+        write_json(pending, del_data)
+        with self.assertRaisesRegex(RuntimeError, "registro de recuperación es antiguo"):
+            recover(self.craft, self.store, self.state_path)
+        self.assertEqual(collect(self.craft), before)
 
     def test_patched_library_is_not_adopted_if_executable_changes(self):
         state, _, _ = self.managed_install()
@@ -179,6 +201,35 @@ class InstallationTests(unittest.TestCase):
             self.assertNotEqual(modified[name], original[name])
         installer.ensure_patch(self.settings, True)
         self.assertEqual(self.source_contents(filenames), modified)
+
+    def test_old_row_patch_is_migrated_and_reverted(self):
+        filenames = self.copy_patched_sources()
+        installer.ensure_patch(self.settings, False)
+        original = self.source_contents(filenames)
+        legacy = self.settings.patch_dir / "legacy/0001-accessibility-row-count.patch"
+        subprocess.run(["patch", "--batch", "--forward", "-p1", "-i", str(legacy)],
+                       cwd=self.settings.source, check=True, capture_output=True)
+        installer.ensure_patch(self.settings, False)
+        self.assertEqual(self.source_contents(filenames), original)
+        subprocess.run(["patch", "--batch", "--forward", "-p1", "-i", str(legacy)],
+                       cwd=self.settings.source, check=True, capture_output=True)
+        installer.ensure_patch(self.settings, True)
+        self.assertTrue(installer.patch_applies(self.settings, self.settings.patches[0], reverse=True))
+        installer.ensure_patch(self.settings, False)
+        self.assertEqual(self.source_contents(filenames), original)
+
+    def test_legacy_patch_does_not_hide_unrelated_source_changes(self):
+        filenames = self.copy_patched_sources()
+        installer.ensure_patch(self.settings, False)
+        legacy = self.settings.patch_dir / "legacy/0001-accessibility-row-count.patch"
+        subprocess.run(["patch", "--batch", "--forward", "-p1", "-i", str(legacy)],
+                       cwd=self.settings.source, check=True, capture_output=True)
+        source = self.settings.source / "src/kitemviews/accessibility/kitemlistviewaccessible.cpp"
+        source.write_text(source.read_text().replace("return accessibleDelegate(columnCount() * row + column);", "return nullptr;"))
+        before = self.source_contents(filenames)
+        with self.assertRaisesRegex(RuntimeError, "no coincide"):
+            installer.ensure_patch(self.settings, True)
+        self.assertEqual(self.source_contents(filenames), before)
 
     def test_sources_with_an_earlier_patch_set_are_upgraded_and_reverted(self):
         filenames = self.copy_patched_sources()

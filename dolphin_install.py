@@ -91,6 +91,25 @@ def patch_applies(settings, patch, reverse):
                           stderr=subprocess.DEVNULL).returncode == 0
 
 
+def migrate_legacy_patch(settings, current_patch):
+    legacy = settings.patch_dir / "legacy/0001-accessibility-row-count.patch"
+    if not legacy.is_file() or not patch_applies(settings, legacy, reverse=True):
+        return False
+    relative = Path("src/kitemviews/accessibility/kitemlistviewaccessible.cpp")
+    with tempfile.TemporaryDirectory(prefix="dolphin-legacy-check-") as temp:
+        trial = Path(temp)
+        destination = trial / relative
+        destination.parent.mkdir(parents=True)
+        shutil.copy2(settings.source / relative, destination)
+        for args in (("-R", legacy), ("--dry-run", current_patch)):
+            result = subprocess.run(["patch", "--batch", "--forward", "-p1", args[0], "-i", str(args[1])],
+                                    cwd=trial, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if result.returncode:
+                return False
+    run("patch", "--batch", "--forward", "-R", "-p1", "-i", legacy, cwd=settings.source)
+    return True
+
+
 def ensure_patch(settings, enabled):
     # Each fix is a separate patch, so sources prepared with an earlier set of
     # patches only need the missing ones applied (or the applied ones reverted).
@@ -106,6 +125,9 @@ def ensure_patch(settings, enabled):
         elif patch_applies(settings, patch, reverse=False):
             if enabled:
                 run("patch", "--batch", "--forward", "-p1", "-i", patch, cwd=settings.source)
+        elif patch.name == "0001-accessibility-table-layout.patch" and migrate_legacy_patch(settings, patch):
+            if enabled:
+                run("patch", "--batch", "--forward", "-p1", "-i", patch, cwd=settings.source)
         else:
             raise RuntimeError(f"El parche {patch.name} no coincide con las fuentes de Dolphin {settings.version}: "
                                "no está ni aplicado ni pendiente.")
@@ -113,8 +135,6 @@ def ensure_patch(settings, enabled):
 
 def build_artifact(settings, store, patched):
     ensure_patch(settings, patched)
-    if patched:
-        run(sys.executable, settings.root / "tests/comprobar-accesibilidad.py")
     cmake = settings.craft / "dev-utils/bin/cmake"
     phase = "corregido" if patched else "sin-parche"
     log = settings.root / "run" / f"compilacion-{phase}.log"
@@ -123,6 +143,9 @@ def build_artifact(settings, store, patched):
     with log.open("w") as output:
         # Use every core: the output is the same, only the number of parallel jobs changes.
         run(cmake, "--build", settings.build, "-j", str(os.cpu_count() or 4), stdout=output, stderr=subprocess.STDOUT)
+        if patched:
+            run(sys.executable, settings.root / "tests/comprobar-accesibilidad.py", "--library",
+                settings.build / "bin/libdolphinprivate.6.dylib")
         with tempfile.TemporaryDirectory(prefix="dolphin-stage-") as directory:
             run(cmake, "--install", settings.build, "--prefix", settings.craft,
                 env=dict(os.environ, DESTDIR=directory), stdout=output, stderr=subprocess.STDOUT)

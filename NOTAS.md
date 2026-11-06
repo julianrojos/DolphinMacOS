@@ -37,7 +37,9 @@ Adaptación local del gestor de archivos de KDE: https://invent.kde.org/system/d
   orden de nombre (`0001-…`, `0002-…`). Cada uno se comprueba por separado: unas
   fuentes preparadas con un conjunto anterior solo reciben los que faltan, y al
   generar la versión sin parche se retiran en orden inverso. Una corrección
-  nueva se añade como un archivo nuevo, sin modificar los existentes.
+  nueva se añade como un archivo nuevo, sin modificar los existentes. El cambio
+  de 0001 conserva el parche antiguo en `legacy/`: el instalador comprueba en
+  una copia que puede retirarlo y aplicar el nuevo antes de migrar las fuentes.
 
 ## Parche, metadatos y recuperación
 
@@ -80,7 +82,11 @@ prototipo se mantienen como históricas, pero no se usan como originales.
 El despliegue sustituye archivos individualmente y verifica firma y versión.
 Si falla, repone la instalación previa. Si se interrumpe el proceso, queda
 `pendiente.json`: `python3 parchear-dolphin.py --recuperar` repone la instantánea
-anterior. No se promete atomicidad del conjunto frente a una interrupción.
+anterior. La recuperación comprueba todos los archivos antes de cambiarlos y
+rechaza los que no coinciden con el estado previo ni con el destino registrado.
+Los registros antiguos sin destino solo permiten recuperar archivos que aún
+coincidan con el estado anterior; si hay diferencias requieren revisión manual.
+No se promete atomicidad del conjunto frente a una interrupción.
 Un bloqueo evita dos instalaciones simultáneas. No borrar `backups/` si se quiere
 conservar la recuperación.
 
@@ -131,9 +137,15 @@ Los errores técnicos del instalador y los metadatos se guardan en
 
 - Entorno inicial: macOS 27.0.1, Apple M2, Xcode 27.2, Python 3.14.0 de python.org.
   Craft `5ec1bc92f`, recetas `1db14d611`, ABI `macos-clang-arm64`.
-- `python3 tests/comprobar-accesibilidad.py` compila el método real de cálculo de
-  filas y pasa diez casos. La prueba detecta el fallo original con un elemento y
-  tres columnas. No es una prueba de integración de accesibilidad con Qt/Cocoa.
+- `python3 tests/comprobar-accesibilidad.py` compila los métodos reales `cellAt()`,
+  `columnCount()` y `rowCount()` junto con el diseño real de elementos
+  (`KItemListViewLayouter`) y comprueba 126 combinaciones (vertical y horizontal,
+  sin grupos y con grupos de 1 y 3, de 0 a 50 elementos, tres anchos): cada
+  elemento queda dentro de la tabla declarada y se encuentra en su fila y columna.
+  Con el código anterior falla (agrupación y orientación horizontal). No es una
+  prueba de integración de accesibilidad con Qt/Cocoa. Durante la instalación,
+  la prueba se ejecuta tras compilar y enlaza con la biblioteca recién generada
+  en la carpeta de compilación, sin exigir una instalación previa de Dolphin.
 - `python3 tests/comprobar-ciclo-real.py` completó en este Mac la restauración
   byte a byte del Info.plist sin perder el parche, la reaplicación de metadatos,
   la restauración completa sin parche y la reinstalación corregida. Se verificó
@@ -154,8 +166,8 @@ Los errores técnicos del instalador y los metadatos se guardan en
   y que abrir Dolphin durante la compilación impide el despliegue. Para los
   parches comprueban activar y retirar el conjunto, actualizar fuentes que solo
   tienen los primeros parches y detenerse ante fuentes que no coinciden.
-  `tests/comprobar-accesibilidad.py` compila y ejecuta el `rowCount()` corregido
-  (parche 0001). Las correcciones de conversión de interfaces (0002) y de vida
+  `tests/comprobar-accesibilidad.py` compila y ejecuta la tabla accesible corregida
+  (parche 0001, que sustituye al anterior de solo `rowCount()`). Las correcciones de conversión de interfaces (0002) y de vida
   del temporizador (0003) no tienen pruebas automáticas de ejecución: se han
   validado a mano (ver Incidencias).
 
@@ -253,9 +265,26 @@ Los errores técnicos del instalador y los metadatos se guardan en
     `NSTextField` durante `QMenu::exec`. No corregido. No se reprodujo con
     Bartender y Raycast cerrados, ni con solo Bartender abierto (menú
     contextual, "Ordenar por" y arrastrar la ventana). Todo apunta a Raycast;
-    no se ha confirmado con solo Raycast abierto porque no se usa. Si se
+    no se ha confirmado con solo Raycast abierto porque no se usa. Los informes
+    históricos se conservaron en `run/crash-reports/`; la causa sigue sin
+    confirmarse y no se ha automatizado la reproducción. Si se
     vuelve a usar Raycast, mantenerlo cerrado mientras se usa Dolphin.
   Validado a mano: tras cada corrección, el cierre correspondiente no se repitió.
+- El 2026-11-06 a las 16:13, al abrir «Ordenar por», Dolphin volvió a cerrarse.
+  El informe `run/crash-reports/dolphin-2026-11-06-161323.ips` registra una
+  `NSRangeException` (índice 8 en un array con dos elementos) durante
+  `KItemListViewAccessible::setAccessibleFocusAndAnnounceAll()`. Es un cierre
+  diferente del fallo de liberación en `QMenu::exec`; la causa exacta y el arreglo
+  siguen sin confirmar. La implementación de Qt/Cocoa indexa las filas nativas
+  usando la fila del elemento accesible; Dolphin calculaba el total mediante el
+  número de elementos y columnas. Con el diseño real se reprodujo la divergencia:
+  una cabecera de grupo empieza una fila nueva, así que la fila de un elemento
+  puede superar el total declarado, y con desplazamiento horizontal filas y
+  columnas están intercambiadas. El parche 0001 ahora toma tamaño y posiciones del
+  propio diseño (`cellAt()` busca por fila con búsqueda binaria). La compilación
+  corregida se instaló y el usuario confirmó que la prueba manual de «Ordenar por»
+  fue bien. Sigue sin comprobarse toda la integración Qt/Cocoa en todas las vistas.
+  Los informes pueden contener información privada.
 - KIO advierte que `/System/Volumes/Data/.Trashes` no pasa sus comprobaciones.
   La prueba de restauración pasó en el disco principal; esto no demuestra
   integración con discos externos.
