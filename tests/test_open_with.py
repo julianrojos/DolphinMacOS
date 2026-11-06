@@ -28,6 +28,10 @@ class OpenWithTests(unittest.TestCase):
         assignment = 'TARGET="$HOME/Applications/Dolphin Open With"'
         self.assertEqual(original.count(assignment), 1)
         self.script.write_text(original.replace(assignment, f"TARGET={shlex.quote(str(self.target))}"))
+        pilot_assignment = 'PILOT_TARGET="$HOME/Applications/Dolphin Open With Pilot"'
+        self.assertEqual(original.count(pilot_assignment), 1)
+        self.pilot_target = self.root / "pilot with spaces"
+        self.script.write_text(self.script.read_text().replace(pilot_assignment, f"PILOT_TARGET={shlex.quote(str(self.pilot_target))}"))
         shutil.copy2(ROOT / "install-menu.py", self.root / "install-menu.py")
         self.bin = self.root / "CraftRoot/bin"
         self.bin.mkdir(parents=True)
@@ -96,6 +100,31 @@ class OpenWithTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertFalse((self.target / self.bridge.name).is_symlink())
             self.assertFalse(self.menu.exists())
+
+    def test_merged_bridge_is_used_without_reading_real_home(self):
+        self.pilot_target.mkdir()
+        merged = self.pilot_target / "test-app.bridge"
+        merged.write_text("combined")
+        result = self.run_setup()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.target / self.bridge.name).resolve(), merged.resolve())
+
+    def test_foreign_destination_is_not_modified_or_menu_installed(self):
+        self.target.mkdir()
+        foreign = self.target / self.bridge.name
+        foreign.write_text("keep")
+        result = self.run_setup()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(foreign.read_text(), "keep")
+        self.assertFalse(self.menu.exists())
+
+    def test_remove_preserves_finder_metadata(self):
+        self.assertEqual(self.run_setup().returncode, 0)
+        ds = self.target / ".DS_Store"
+        ds.write_text("finder metadata")
+        self.assertEqual(self.run_setup("--remove").returncode, 0)
+        self.assertEqual(ds.read_text(), "finder metadata")
+        self.assertFalse((self.target / self.bridge.name).exists())
 
     def test_invalid_arguments_have_no_side_effects(self):
         for args in (("--invalid",), ("--remove", "--invalid"), ("--help", "--remove")):
@@ -176,6 +205,19 @@ class OpenWithTests(unittest.TestCase):
         self.target.unlink()
         result = self.run_setup()
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_running_pilot_lock_blocks_without_side_effects(self):
+        import fcntl
+        lock_path = self.root / "run/open-with.lock"
+        lock_path.parent.mkdir()
+        with lock_path.open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            result = self.run_setup()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Ya se está ejecutando", result.stderr)
+        self.assertFalse(self.menu.exists())
+        self.assertFalse(self.target.exists())
+        self.assertFalse(self.cache_called.exists())
 
     def test_cache_failure_keeps_diagnostic_log_and_can_be_retried(self):
         self.tool("kbuildsycoca6", "echo 'cache failure detail' >&2\nexit 1\n")

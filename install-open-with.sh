@@ -9,6 +9,7 @@ set -euo pipefail
 ROOT="${0:A:h}"
 CRAFT_ROOT="$ROOT/CraftRoot"
 TARGET="$HOME/Applications/Dolphin Open With"
+PILOT_TARGET="$HOME/Applications/Dolphin Open With Pilot"
 
 # Help works without Craft and does not modify files or rebuild the cache.
 if (( $# == 1 )) && [[ "$1" == "--help" ]]; then
@@ -36,24 +37,53 @@ for tool in qtpaths6 kbuildsycoca6; do
     fi
 done
 
+# Shared with tools/install-macos-pilot.py: both change the same links and the
+# cache. The lock is released when the shell exits.
+zmodload zsh/system
+mkdir -p "$ROOT/run"
+: >> "$ROOT/run/open-with.lock"  # zsystem flock needs an existing file
+if ! zsystem flock -t 0 "$ROOT/run/open-with.lock" 2> /dev/null; then
+    print -u2 -- "Ya se está ejecutando otra instalación de \"Abrir con\" o del piloto. Espera a que termine."
+    exit 1
+fi
+
+# Check all affected names before changing the menu or any links.
+for bridge in "$ROOT"/share/applications/*.desktop(N); do
+    link="$TARGET/${bridge:t}"
+    merged="$PILOT_TARGET/${bridge:t:r}.bridge"
+    if [[ -e "$link" || -L "$link" ]]; then
+        if [[ ! -L "$link" ]]; then
+            print -u2 -- "No se modifica un archivo ajeno: $link"
+            exit 1
+        fi
+        current="$(readlink "$link")"
+        if [[ "$current" != "$bridge" && "$current" != "$merged" ]]; then
+            print -u2 -- "No se modifica un enlace ajeno: $link"
+            exit 1
+        fi
+    fi
+done
+
 # Validate ownership and update the menu before modifying any bridge links.
 operation="configurar el menú de aplicaciones"
 python3 "$ROOT/install-menu.py" "$@"
 
 operation="actualizar los enlaces a las aplicaciones"
 if [[ "${1:-}" == "--remove" ]]; then
-    for link in "$TARGET"/*.desktop(N@); do
-        rm "$link"
+    for bridge in "$ROOT"/share/applications/*.desktop(N); do
+        link="$TARGET/${bridge:t}"
+        [[ ! -L "$link" ]] || rm "$link"
     done
     rmdir "$TARGET" 2> /dev/null || true
 else
     mkdir -p "$TARGET"
-    # Drop links to bridges that no longer exist in the project.
-    for link in "$TARGET"/*.desktop(N@); do
-        [[ -e "$link" ]] || rm "$link"
-    done
     for bridge in "$ROOT"/share/applications/*.desktop(N); do
-        ln -sfn "$bridge" "$TARGET/${bridge:t}"
+        merged="$PILOT_TARGET/${bridge:t:r}.bridge"
+        if [[ -f "$merged" ]]; then
+            ln -sfn "$merged" "$TARGET/${bridge:t}"
+        else
+            ln -sfn "$bridge" "$TARGET/${bridge:t}"
+        fi
     done
 fi
 

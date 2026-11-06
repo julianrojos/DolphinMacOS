@@ -294,11 +294,12 @@ Usar nombres nuevos si el archivo de una prueba anterior ya existe.
 
 ### Piloto de aplicaciones de macOS
 
-`python3 tools/install-macos-pilot.py` consulta LaunchServices para texto,
-Python, JSON, PDF y MP4 e instala puentes adicionales en
+`python3 tools/install-macos-pilot.py` consulta LaunchServices para extensiones
+simples de la base MIME de Dolphin; `--pilot` limita la consulta a texto, Python,
+JSON, PDF y MP4. Instala puentes adicionales en
 `~/Applications/Dolphin Open With Pilot`. `--remove` retira el piloto y
-regenera la caché. Los puentes originales se conservan y tienen prioridad en
-caso de identificadores duplicados. El piloto no cambia las asociaciones
+regenera la caché. Los puentes originales conservan sus metadatos y tipos; los tipos detectados
+se combinan en una sola entrada por aplicación. El piloto no cambia las asociaciones
 predeterminadas ni garantiza la edición de archivos remotos. Se deben ejecutar
 las órdenes de nuevo para reflejar cambios en las aplicaciones instaladas.
 La selección se limita a las carpetas habituales de aplicaciones; puede omitir
@@ -310,10 +311,37 @@ las aplicaciones sin agruparlas; para un menú agrupado habría que clasificarla
 LaunchServices puede devolver varias copias de una aplicación (por ejemplo,
 actualizaciones en carpetas de caché); se descartan las que están fuera de las
 carpetas habituales antes de quedarse con una por identificador. Un bloqueo en
-`run/macos-pilot.lock` impide dos ejecuciones a la vez. Si una ejecución se
+`run/open-with.lock`, compartido con `install-open-with.sh`, impide que el piloto
+y la instalación de "Abrir con" cambien a la vez los enlaces o la caché. Al
+sincronizar los enlaces de los puentes manuales se comprueban todos antes de
+cambiar ninguno. Si una ejecución se
 interrumpe, la siguiente revisa las carpetas `~/Applications/.dolphin-pilot-*`:
 recupera los puentes anteriores si no hay otros instalados, borra los restos
 obsoletos (también una carpeta de preparación vacía) y se detiene, indicando la
 ruta, si encuentra contenido ajeno. Tras resolver restos regenera la caché, por
 si la ejecución interrumpida no llegó a hacerlo. Si la regeneración falla,
 se conservan los restos y basta con repetir la orden para volver a intentarlo.
+El piloto requiere que se haya ejecutado antes `./install-open-with.sh`. Los archivos
+`.DS_Store` se conservan; si aparecen en una carpeta temporal de recuperación,
+sus restos gestionados se descartan para que no se restauren por error tras
+retirar el piloto, y la carpeta puede permanecer en disco para conservar los
+metadatos.
+
+La opción `--full` amplía el piloto a extensiones simples con un tipo declarado
+por macOS y aplicaciones disponibles, usando el MIME que Qt asigna al nombre.
+Conserva también las cinco asociaciones del piloto. Compara las familias conocidas de macOS con Qt; si no puede compararlas,
+acepta la extensión si macOS no declara MIME (no hay prueba de conflicto) o si su MIME
+coincide con el de Qt tras resolver alias y mayúsculas; si macOS declara otro MIME, la
+rechaza. `KNOWN_CONFLICTS` excluye formatos distintos que comparten familia, como
+`.pcf`, `.pic` y `.vlc`. Aunque coincidan las familias, se rechaza la extensión si
+Qt reconoce el MIME de macOS como otro tipo (`.f4v`: `video/x-flv` frente a
+`video/mp4`), porque sus aplicaciones se ofrecerían para todos los archivos del tipo
+de Qt; si Qt no conoce ese MIME (`.py`: `text/x-python-script`), se acepta por
+compatibilidad de familia al no haber conflicto conocido. Así quedan fuera también `.m3u`, `.m3u8`, `.svgz` y las
+variantes de JPEG 2000. Las cinco extensiones del piloto se conservan salvo que el
+informe las rechace por cualquier motivo. Excluye también
+tipos dinámicos, patrones complejos y el tipo genérico
+`application/octet-stream`. Las extensiones aceptadas son compatibles por
+familia (texto, imagen, audio, vídeo), no un formato verificado. `python3 tools/preview-macos-bridges.py --full-report`
+produce un informe JSON detallado antes de instalar. El instalador usa esta cobertura ampliada por defecto; `--pilot` instala
+únicamente el piloto de cinco extensiones. Los puentes manuales se combinan con los tipos detectados y se restauran al retirar el piloto.
