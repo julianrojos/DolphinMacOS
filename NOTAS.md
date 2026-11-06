@@ -39,7 +39,8 @@ Si Craft modifica o retira archivos, `python3 parchear-dolphin.py --reinstalar`
 permite reconstruir desde fuentes sin borrar el manifiesto a mano. Conserva una
 instantánea previa y genera de nuevo la referencia sin parche. Los demás modos
 siguen rechazando modificaciones externas. El instalador comprueba que Dolphin
-esté cerrado; no cierra procesos automáticamente.
+esté cerrado al empezar y de nuevo justo antes de sustituir archivos, porque la
+compilación tarda minutos; no cierra procesos automáticamente.
 
 `python3 configurar-app.py` aplica nombre, identificador y versión al paquete de
 una instalación registrada y actualiza sus firmas y manifiesto.
@@ -59,6 +60,16 @@ Si falla, repone la instalación previa. Si se interrumpe el proceso, queda
 anterior. No se promete atomicidad del conjunto frente a una interrupción.
 Un bloqueo evita dos instalaciones simultáneas. No borrar `backups/` si se quiere
 conservar la recuperación.
+
+Limitaciones conocidas:
+
+- El bloqueo solo cubre `parchear-dolphin.py`, `configurar-app.py` y
+  `limpiar-copias.py`, y vive en `backups/<versión>/`. La parte de Craft de
+  `setup.sh` (dependencias, fuentes y carpeta de compilación, compartidas entre
+  versiones) no está bloqueada: no ejecutar dos `setup.sh` a la vez.
+- `limpiar-copias.py --quitar-proteccion` valida antes todas las copias
+  protegidas. Si una copia protegida está dañada, no se puede retirar su
+  protección con la herramienta; habría que editar `protegidas.json` a mano.
 
 Las copias diferentes consumen espacio y no se eliminan automáticamente.
 `python3 limpiar-copias.py` enumera tanto copias como archivos de historial.
@@ -108,7 +119,7 @@ Los errores técnicos del instalador y los metadatos se guardan en
 - `./comprobar-kio.sh` copia archivos y carpetas, rechaza un conflicto sin alterar
   el destino, mueve, envía a `trash:/` y restaura un archivo temporal propio,
   verificando ruta y contenido. No vacía ninguna papelera.
-- `python3 -m unittest discover -s tests -p 'test_*.py'` pasa veinticuatro pruebas de
+- `python3 -m unittest discover -s tests -p 'test_*.py'` pasa veinticinco pruebas de
   instalación, errores claros de JSON/configuración, copias dañadas, metadatos,
   cambios del ejecutable, reversión por fallo y recuperación de una interrupción.
   La preparación inicial con Craft se simula; el despliegue completo y la
@@ -116,7 +127,8 @@ Los errores técnicos del instalador y los metadatos se guardan en
   Las nuevas pruebas usan archivos temporales para ejecutar la limpieza,
   comparar el plan con lo borrado, proteger copias iniciales y comprobar la
   reinstalación tras cambios externos y el archivo de configuraciones CMake.
-  También cubren procesos con rutas absolutas, relativas y nombre de ejecutable.
+  También cubren procesos con rutas absolutas, relativas y nombre de ejecutable,
+  y que abrir Dolphin durante la compilación impide el despliegue.
 
 ## Incidencias investigadas
 

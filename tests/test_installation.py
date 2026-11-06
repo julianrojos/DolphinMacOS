@@ -221,6 +221,20 @@ craft() {
         self.assertEqual(read_json(self.state_path)["baseline"], state["baseline"])
         self.assertTrue(any(self.store.load(path.name)[1] == before for path in self.store.root.iterdir()))
 
+    def test_dolphin_opened_during_build_blocks_deploy(self):
+        state, _, _ = self.managed_install()
+        before, old_state = collect(self.craft), self.state_path.read_bytes()
+        opened = RuntimeError("Dolphin está abierto.")
+        with patch.object(installer, "load", return_value=self.settings), patch.object(installer, "validate_sources"), \
+             patch.object(installer, "build_artifact", side_effect=[state["baseline"], state["installed"]]), \
+             patch.object(installer, "ensure_closed", side_effect=[None, opened]), \
+             patch.object(installer, "deploy") as deploy:
+            with self.assertRaisesRegex(RuntimeError, "está abierto"):
+                installer.main([])
+            deploy.assert_not_called()
+        self.assertEqual(collect(self.craft), before)
+        self.assertEqual(self.state_path.read_bytes(), old_state)
+
     def test_cleanup_initial_migration_protects_every_existing_copy(self):
         self.managed_install()
         old = self.store.save(self.tree("uncertain-original", b"possibly Craft"))

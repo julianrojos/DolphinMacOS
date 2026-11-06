@@ -197,5 +197,7 @@ def main(argv=None):
             run("codesign", "--verify", settings.app)
             check_version(settings.app / "Contents/MacOS/dolphin", settings.version)
 
+        # La compilación tarda minutos: Dolphin pudo abrirse mientras tanto.
+        ensure_closed(settings)
         deploy(settings.craft, store, target, state["managed"], state_path, state, validate)
         print("Instalación completa verificada. Reinicia Dolphin para cargarla.")
