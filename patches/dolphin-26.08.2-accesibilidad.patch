@@ -1,0 +1,13 @@
+--- a/src/kitemviews/accessibility/kitemlistviewaccessible.cpp
++++ b/src/kitemviews/accessibility/kitemlistviewaccessible.cpp
+@@ -117,10 +117,6 @@ int KItemListViewAccessible::rowCount() const
+     int itemCount = view()->model()->count();
+     int rowCount = itemCount / columnCount();
+ 
+-    if (rowCount <= 0) {
+-        return 0;
+-    }
+-
+     if (itemCount % columnCount()) {
+         ++rowCount;
+     }
