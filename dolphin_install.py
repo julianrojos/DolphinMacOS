@@ -121,7 +121,8 @@ def build_artifact(settings, store, patched):
     log.parent.mkdir(exist_ok=True)
     print(f"Compilando Dolphin completo ({phase}). Registro: {log}", flush=True)
     with log.open("w") as output:
-        run(cmake, "--build", settings.build, "-j", "4", stdout=output, stderr=subprocess.STDOUT)
+        # Use every core: the output is the same, only the number of parallel jobs changes.
+        run(cmake, "--build", settings.build, "-j", str(os.cpu_count() or 4), stdout=output, stderr=subprocess.STDOUT)
         with tempfile.TemporaryDirectory(prefix="dolphin-stage-") as directory:
             run(cmake, "--install", settings.build, "--prefix", settings.craft,
                 env=dict(os.environ, DESTDIR=directory), stdout=output, stderr=subprocess.STDOUT)

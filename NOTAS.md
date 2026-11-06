@@ -43,6 +43,7 @@ bibliotecas, plugins, utilidades y recursos. Genera primero una instalación sin
 parche y después otra corregida desde las mismas fuentes y dependencias. Ambas
 se preparan con DESTDIR y se firman localmente antes de desplegarse. Los 380
 archivos de la instalación probada coinciden con el artefacto corregido.
+Compila con tantos trabajos en paralelo como núcleos tenga el Mac.
 
 `python3 parchear-dolphin.py --restaurar` instala la compilación completa sin
 parche registrada para esa instalación. Esta referencia se genera desde fuentes:
