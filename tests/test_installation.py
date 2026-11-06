@@ -247,6 +247,7 @@ craft() {
         open_with = self.root / "install-open-with.sh"
         open_with.write_text('#!/bin/zsh\ntest -f "${0:A:h}/complete-install-called"\ntouch "${0:A:h}/open-with-called"\n')
         open_with.chmod(0o755)
+        (self.root / "install-kio-filter.py").write_text('from pathlib import Path\np=Path(__file__).parent\nassert (p/"open-with-called").exists()\n(p/"kio-filter-called").touch()\n')
         # Stub: the real script reloads the launchd D-Bus agent.
         dbus_fix = self.root / "fix-dbus-service.sh"
         dbus_fix.write_text('#!/bin/zsh\ntouch "${0:A:h}/dbus-fix-called"\n')
@@ -262,6 +263,7 @@ craft() {
             self.assertIn(f"--no-cache --{action} dolphin", actions)
         self.assertTrue((self.root / "complete-install-called").exists())
         self.assertTrue((self.root / "open-with-called").exists())
+        self.assertTrue((self.root / "kio-filter-called").exists())
         self.assertTrue((self.root / "dbus-fix-called").exists())
         archived = list((self.root / "bootstrap").glob("build-anterior.*/build/CMakeCache.txt"))
         self.assertEqual(len(archived), 1)
@@ -348,6 +350,26 @@ craft() {
         pending.unlink()
         (self.settings.backups / "historial/bad.json").write_text("{")
         with self.assertRaisesRegex(RuntimeError, "JSON"):
+            cleanup.plan(self.settings)
+
+    def test_cleanup_preserves_active_kio_filter_and_pending_recovery(self):
+        state, _, _ = self.managed_install()
+        kio_original = self.store.save(self.tree("kio-original", b"original KIO"))
+        kio_filtered = self.store.save(self.tree("kio-filtered", b"filtered KIO"))
+        write_json(self.settings.backups / "protegidas.json", {"artifacts": [kio_original], "history": []})
+        write_json(self.settings.backups / "kio-filter/installation.json",
+                   {"schema": 1, "baseline": kio_original, "installed": kio_filtered})
+        for index in range(4):
+            self.store.save(self.tree(f"later-{index}", str(index).encode()))
+        candidates, _, _ = cleanup.plan(self.settings)
+        self.assertNotIn(self.store.root / kio_original, candidates)
+        self.assertNotIn(self.store.root / kio_filtered, candidates)
+        with patch.object(cleanup, "load", return_value=self.settings):
+            with self.assertRaisesRegex(RuntimeError, "instalación activa"):
+                cleanup.main(["--quitar-proteccion", f"copia:{kio_original}"])
+        pending = self.settings.backups / "kio-filter/pendiente.json"
+        pending.write_text("{}")
+        with self.assertRaisesRegex(RuntimeError, "pendiente"):
             cleanup.plan(self.settings)
 
     def test_cleanup_lock_failure_has_clear_error(self):

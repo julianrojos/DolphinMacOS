@@ -1,0 +1,139 @@
+--- a/src/widgets/kopenwithdialog.cpp
++++ b/src/widgets/kopenwithdialog.cpp
+@@ -28,6 +28,7 @@
+ #include <QtAlgorithms>
+ 
+ #include <KAuthorized>
++#include <KApplicationTrader>
+ #include <KCollapsibleGroupBox>
+ #include <KDesktopFile>
+ #include <KHistoryComboBox>
+@@ -385,6 +386,19 @@
+ {
+ }
+ 
++void QTreeViewProxyFilter::setCompatibleApplications(const QSet<QString> &paths, bool enabled)
++{
++    m_compatibleApplications = paths;
++    m_filterByType = enabled;
++    invalidateFilter();
++}
++
++void QTreeViewProxyFilter::setShowAllApplications(bool showAll)
++{
++    m_showAll = showAll;
++    invalidateFilter();
++}
++
+ bool QTreeViewProxyFilter::filterAcceptsRow(int sourceRow, const QModelIndex &parent) const
+ {
+     QModelIndex index = sourceModel()->index(sourceRow, 0, parent);
+@@ -395,7 +409,9 @@
+ 
+     // Match only on leaf nodes; the pattern is pre-escaped
+     // so just do plain text matching
+-    return !sourceModel()->hasChildren(index) //
++    const auto appModel = static_cast<const KApplicationModel *>(sourceModel());
++    const bool compatible = !m_filterByType || m_showAll || m_compatibleApplications.contains(appModel->entryPathFor(index));
++    return !sourceModel()->hasChildren(index) && compatible //
+         && index.data().toString().contains(filterRegularExpression());
+ }
+ 
+@@ -541,6 +557,7 @@
+     QLabel *label;
+     QString qMimeType;
+     QString qMimeTypeComment;
++    QStringList filterMimeTypes;
+     KCollapsibleGroupBox *dialogExtension;
+     QCheckBox *terminal;
+     QCheckBox *remember;
+@@ -637,6 +654,17 @@
+ 
+ void KOpenWithDialogPrivate::setMimeTypeFromUrls(const QList<QUrl> &_urls)
+ {
++    QMimeDatabase filterDatabase;
++    for (const QUrl &url : _urls) {
++        const QMimeType mime = filterDatabase.mimeTypeForUrl(url);
++        if (!mime.isValid() || mime.isDefault()) {
++            filterMimeTypes.clear();
++            break;
++        }
++        if (!filterMimeTypes.contains(mime.name())) {
++            filterMimeTypes.append(mime.name());
++        }
++    }
+     if (_urls.count() == 1) {
+         QMimeDatabase db;
+         QMimeType mime = db.mimeTypeForUrl(_urls.first());
+@@ -655,7 +683,11 @@
+ {
+     qMimeType = mimeType;
+     QMimeDatabase db;
+-    qMimeTypeComment = db.mimeTypeForName(mimeType).comment();
++    const QMimeType mime = db.mimeTypeForName(mimeType);
++    qMimeTypeComment = mime.comment();
++    if (mime.isValid() && !mime.isDefault()) {
++        filterMimeTypes = {mime.name()};
++    }
+ }
+ 
+ void KOpenWithDialogPrivate::init(const QString &_text, const QString &_value)
+@@ -729,9 +761,34 @@
+     proxyModel->setFilterKeyColumn(0);
+     proxyModel->setFilterCaseSensitivity(Qt::CaseInsensitive);
+     proxyModel->setRecursiveFilteringEnabled(true);
++    QSet<QString> compatible;
++    bool firstType = true;
++    for (const QString &mime : std::as_const(filterMimeTypes)) {
++        QSet<QString> offers;
++        for (const KService::Ptr &service : KApplicationTrader::queryByMimeType(mime)) {
++            offers.insert(service->entryPath());
++        }
++        compatible = firstType ? offers : compatible.intersect(offers);
++        firstType = false;
++    }
++    proxyModel->setCompatibleApplications(compatible, !filterMimeTypes.isEmpty());
+     view->setModels(appModel, proxyModel);
+     topLayout->addWidget(view);
+     topLayout->setStretchFactor(view, 1);
++
++    if (!filterMimeTypes.isEmpty()) {
++        auto *showAll = new QCheckBox(i18n("Show all applications"), q);
++        showAll->setObjectName(QStringLiteral("showAllApplications"));
++        QObject::connect(showAll, &QCheckBox::toggled, proxyModel, &QTreeViewProxyFilter::setShowAllApplications);
++        if (compatible.isEmpty()) {
++            auto *noCompatible = new QLabel(i18n("No applications are compatible with all selected files."), q);
++            noCompatible->setObjectName(QStringLiteral("noCompatibleApplications"));
++            noCompatible->setWordWrap(true);
++            QObject::connect(showAll, &QCheckBox::toggled, noCompatible, &QLabel::setHidden);
++            topLayout->addWidget(noCompatible);
++        }
++        topLayout->addWidget(showAll);
++    }
+ 
+     QObject::connect(view, &KApplicationView::selected, q, &KOpenWithDialog::slotSelected);
+     QObject::connect(view, &KApplicationView::highlighted, q, &KOpenWithDialog::slotHighlighted);
+--- a/src/widgets/kopenwithdialog_p.h
++++ b/src/widgets/kopenwithdialog_p.h
+@@ -10,6 +10,7 @@
+ #define OPENWITHDIALOG_P_H
+ 
+ #include <QAbstractItemModel>
++#include <QSet>
+ #include <QSortFilterProxyModel>
+ #include <QTreeView>
+ 
+@@ -60,6 +61,13 @@
+ public:
+     explicit QTreeViewProxyFilter(QObject *parent = nullptr);
+     bool filterAcceptsRow(int sourceRow, const QModelIndex &sourceParent) const override;
++    void setCompatibleApplications(const QSet<QString> &paths, bool enabled);
++    void setShowAllApplications(bool showAll);
++
++private:
++    QSet<QString> m_compatibleApplications;
++    bool m_filterByType = false;
++    bool m_showAll = false;
+ };
+ 
+ class KApplicationViewPrivate;

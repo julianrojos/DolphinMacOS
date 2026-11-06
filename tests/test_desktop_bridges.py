@@ -29,6 +29,17 @@ def installed_app(bundle):
 
 
 class DesktopBridgeTests(unittest.TestCase):
+    def test_relevant_apps_are_associated_with_text_pdf_and_video(self):
+        expected = {
+            "text/plain": {"com.apple.TextEdit"},
+            "application/pdf": {"com.apple.Preview"},
+            "video/mp4": {"com.apple.QuickTimePlayerX", "com.colliderli.iina", "org.videolan.vlc"},
+        }
+        for mime, apps in expected.items():
+            with self.subTest(mime=mime):
+                actual = {path.stem for path in BRIDGES if mime in read_entry(path).get("MimeType", "").split(";")}
+                self.assertEqual(actual, apps)
+
     def test_bridges_exist(self):
         self.assertTrue(BRIDGES)
 
@@ -49,7 +60,7 @@ class DesktopBridgeTests(unittest.TestCase):
                 for mime in mimes:
                     self.assertRegex(mime, MIME)
                 self.assertEqual(len(mimes), len(set(mimes)))
-                # Keep category metadata complete for menu configurations that use it.
+                # Hand-curated bridges include verified categories for grouped menus.
                 self.assertTrue([c for c in entry.get("Categories", "").split(";") if c])
                 self.assertEqual(entry.get("Terminal"), "false")
 

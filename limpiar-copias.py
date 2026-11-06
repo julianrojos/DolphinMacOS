@@ -13,7 +13,7 @@ from dolphin_store import Store, write_json
 
 def plan(settings):
     from dolphin_install import load_state
-    if (settings.backups / "pendiente.json").exists():
+    if (settings.backups / "pendiente.json").exists() or (settings.backups / "kio-filter/pendiente.json").exists():
         raise RuntimeError("Resuelve la operación pendiente antes de limpiar copias.")
     current = load_state(settings)
     if current is None:
@@ -41,6 +41,14 @@ def plan(settings):
     if not set(pins["history"]) <= {path.name for path in history}:
         raise RuntimeError("El registro protege archivos de historial que no existen.")
     protected = set(pins["artifacts"])
+    kio_state_path = settings.backups / "kio-filter/installation.json"
+    if kio_state_path.exists():
+        kio_state = read_json(kio_state_path)
+        if kio_state.get("schema") != 1 or not {"baseline", "installed"} <= kio_state.keys():
+            raise RuntimeError("The KIO filter installation manifest is invalid")
+        for key in ("baseline", "installed"):
+            store.load(kio_state[key])
+            protected.add(kio_state[key])
     for key in protected:
         store.load(key)
     retained_states = [state for index, state in enumerate(states) if index < 3 or history[index].name in pins["history"]]
@@ -73,6 +81,10 @@ def main(argv=None):
         from dolphin_install import load_state
         current = load_state(settings)
         active = {current["baseline"], current["installed"]}
+        kio_state_path = settings.backups / "kio-filter/installation.json"
+        if kio_state_path.exists():
+            kio_state = read_json(kio_state_path)
+            active.update((kio_state["baseline"], kio_state["installed"]))
         if args.listar_protecciones:
             for key in sorted(set(pins["artifacts"]) | active):
                 roles = []

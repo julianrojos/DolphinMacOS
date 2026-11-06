@@ -82,6 +82,7 @@ fi
 echo "Compilando e instalando Dolphin completo con la corrección local..."
 python3 "$ROOT/parchear-dolphin.py"
 "$ROOT/install-open-with.sh"
+python3 "$ROOT/install-kio-filter.py" --skip-unsupported
 
 echo "Listo: $CRAFT_ROOT/Applications/KDE/dolphin.app"
 echo "Para abrirlo: ./abrir-dolphin.sh"
