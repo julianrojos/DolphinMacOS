@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Preview
+Comment=Open with macOS Preview
+Icon=image-x-generic
+Exec=/usr/bin/open -b com.apple.Preview %F
+MimeType=image/png;image/jpeg;image/gif;image/tiff;image/bmp;image/webp;image/heic;image/heif;image/svg+xml;image/x-icon;
+Terminal=false
+Categories=Graphics;Viewer;

@@ -243,6 +243,10 @@ craft() {
 }
 ''')
         (self.root / "parchear-dolphin.py").write_text('from pathlib import Path\np=Path(__file__).parent\nassert (p/"CraftRoot/build/kde/applications/dolphin/work/build/CMakeCache.txt").exists()\n(p/"complete-install-called").touch()\n')
+        # Stub: the real script writes to ~/Applications.
+        open_with = self.root / "install-open-with.sh"
+        open_with.write_text('#!/bin/zsh\ntest -f "${0:A:h}/complete-install-called"\ntouch "${0:A:h}/open-with-called"\n')
+        open_with.chmod(0o755)
         # Stub: the real script reloads the launchd D-Bus agent.
         dbus_fix = self.root / "fix-dbus-service.sh"
         dbus_fix.write_text('#!/bin/zsh\ntouch "${0:A:h}/dbus-fix-called"\n')
@@ -257,6 +261,7 @@ craft() {
         for action in ("fetch", "unpack", "configure"):
             self.assertIn(f"--no-cache --{action} dolphin", actions)
         self.assertTrue((self.root / "complete-install-called").exists())
+        self.assertTrue((self.root / "open-with-called").exists())
         self.assertTrue((self.root / "dbus-fix-called").exists())
         archived = list((self.root / "bootstrap").glob("build-anterior.*/build/CMakeCache.txt"))
         self.assertEqual(len(archived), 1)

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=VLC
+Comment=Open with VLC
+Icon=video-x-generic
+Exec=/usr/bin/open -b org.videolan.vlc %F
+MimeType=video/mp4;video/quicktime;video/x-m4v;video/x-matroska;video/webm;video/x-msvideo;video/x-ms-wmv;video/x-flv;video/mpeg;video/ogg;video/3gpp;video/mp2t;
+Terminal=false
+Categories=AudioVideo;Video;Player;

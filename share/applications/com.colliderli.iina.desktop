@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=IINA
+Comment=Open with IINA
+Icon=video-x-generic
+Exec=/usr/bin/open -b com.colliderli.iina %F
+MimeType=video/mp4;video/quicktime;video/x-m4v;video/x-matroska;video/webm;video/x-msvideo;video/x-ms-wmv;video/x-flv;video/mpeg;video/ogg;video/3gpp;video/mp2t;
+Terminal=false
+Categories=AudioVideo;Video;Player;

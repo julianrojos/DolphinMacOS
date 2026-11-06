@@ -81,6 +81,7 @@ if [[ ! -f "$SOURCE/src/kitemviews/accessibility/kitemlistviewaccessible.cpp" ||
 fi
 echo "Compilando e instalando Dolphin completo con la corrección local..."
 python3 "$ROOT/parchear-dolphin.py"
+"$ROOT/install-open-with.sh"
 
 echo "Listo: $CRAFT_ROOT/Applications/KDE/dolphin.app"
 echo "Para abrirlo: ./abrir-dolphin.sh"

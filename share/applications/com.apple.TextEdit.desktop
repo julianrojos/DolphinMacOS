@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=TextEdit
+Comment=Open with macOS TextEdit
+Icon=accessories-text-editor
+Exec=/usr/bin/open -b com.apple.TextEdit %F
+MimeType=text/plain;application/json;
+Terminal=false
+Categories=Utility;TextEditor;

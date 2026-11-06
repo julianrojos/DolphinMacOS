@@ -7,12 +7,24 @@ Adaptación local del gestor de archivos de KDE: https://invent.kde.org/system/d
 - `./setup.sh` comprueba las herramientas e instala las dependencias de Dolphin
   con Craft. Solo las dependencias usan la caché. Si faltan las fuentes o la
   configuración local, ejecuta `fetch`, `unpack` y `configure` sin caché para
-  Dolphin. Después llama al instalador completo. Los registros de Craft están en
-  `bootstrap/` y los de compilación en `run/`. No se ha repetido la descarga de
-  todas las dependencias en un entorno vacío.
-- `./abrir-dolphin.sh [carpeta]` abre una sesión D-Bus privada y genera un registro
-  independiente en `run/`. Detecta si el proceso termina en los dos primeros
-  segundos; que siga activo no demuestra que haya una ventana funcional.
+  Dolphin. Después llama al instalador completo, a `fix-dbus-service.sh` y a
+  `install-open-with.sh`. Los registros de Craft están en `bootstrap/` y los de
+  compilación en `run/`. No se ha repetido la descarga de todas las
+  dependencias en un entorno vacío.
+- Dolphin se puede abrir desde el Dock o el Finder
+  (`CraftRoot/Applications/KDE/dolphin.app`) gracias a `fix-dbus-service.sh`
+  y al `LSEnvironment` del Info.plist (ver Incidencias).
+- `./abrir-dolphin.sh [carpeta]` abre Dolphin con una sesión D-Bus privada y
+  genera un registro independiente en `run/`. Útil para depurar. Detecta si el
+  proceso termina en los dos primeros segundos; que siga activo no demuestra
+  que haya una ventana funcional.
+- `./fix-dbus-service.sh` corrige y recarga el servicio D-Bus de launchd que
+  instala Craft. Solo lo recarga si cambia o no responde, porque recargarlo
+  desconecta las aplicaciones KDE abiertas. Repetirlo si Craft reinstala su
+  paquete de D-Bus. El plist original está en
+  `run/org.freedesktop.dbus-session.plist.original`.
+- `./install-open-with.sh` registra las aplicaciones de macOS para "Abrir con"
+  (ver más abajo); `--remove` las retira.
 - La versión se define en `dolphin-version.json`. Los scripts comprueban el
   ejecutable antes de modificarlo. Cambiar la versión exige validar también los
   parches: una versión sin `patches/<versión>/` se rechaza explícitamente.
@@ -124,7 +136,7 @@ Los errores técnicos del instalador y los metadatos se guardan en
 - `./comprobar-kio.sh` copia archivos y carpetas, rechaza un conflicto sin alterar
   el destino, mueve, envía a `trash:/` y restaura un archivo temporal propio,
   verificando ruta y contenido. No vacía ninguna papelera.
-- `python3 -m unittest discover -s tests -p 'test_*.py'` pasa veintisiete pruebas de
+- `python3 -m unittest discover -s tests -p 'test_*.py'` pasa veintiocho pruebas de
   instalación, errores claros de JSON/configuración, copias dañadas, metadatos,
   cambios del ejecutable, reversión por fallo y recuperación de una interrupción.
   La preparación inicial con Craft se simula; el despliegue completo y la
@@ -147,10 +159,27 @@ Los errores técnicos del instalador y los metadatos se guardan en
   `SSL_CERT_FILE=/etc/ssl/cert.pem` manteniendo la verificación HTTPS.
 - Enlaces rotos de Qt en `CraftRoot/include/` bloquearon una instalación. El
   instalador reintenta una vez solo si encuentra y elimina esos enlaces rotos.
-- El D-Bus de launchd de Craft buscaba su configuración en una ruta de KDE.
-  El lanzador usa un bus privado con configuración y socket explícitos. Los dos
-  demonios del lanzador antiguo se identificaron y recibieron SIGTERM. Sus
-  archivos de estado y registros antiguos se archivaron en `run/legacy/`.
+- El D-Bus de launchd de Craft buscaba su configuración en una ruta de KDE
+  (`/Users/gitlab/...`) y moría; Dolphin abierto desde el Dock esperaba el bus
+  para siempre sin mostrar ventana. `fix-dbus-service.sh` añade
+  `--config-file` al servicio. `abrir-dolphin.sh` sigue usando un bus privado.
+  Los dos demonios del lanzador antiguo recibieron SIGTERM; sus archivos de
+  estado y registros se archivaron en `run/legacy/`.
+- Tipos MIME: el Qt de Craft busca datos adicionales en `QT_DATA_DIRS` (parche
+  de Craft `qstandardpaths-extra-dirs-macos.diff`), no en `XDG_DATA_DIRS`.
+  `abrir-dolphin.sh` lo exporta y el Info.plist lo declara en `LSEnvironment`
+  para los arranques desde el Dock (`set_metadata`, `configurar-app.py`).
+- "Abrir con" estaba vacío: KIO lo llena con `KApplicationTrader`, que solo
+  conoce aplicaciones con `.desktop`, y en macOS KService solo los busca en
+  `/Applications` y `~/Applications`, sin seguir carpetas enlazadas. Los puentes
+  están en `share/applications/` (`Exec=/usr/bin/open -b <bundle id> %F`):
+  TextEdit (texto, JSON), Preview (imágenes), QuickTime Player, VLC e IINA
+  (vídeo). `install-open-with.sh` crea `~/Applications/Dolphin Open With/` con
+  un enlace por archivo y regenera la caché con `kbuildsycoca6`. Tras añadir un
+  puente: ejecutar el script y reiniciar Dolphin. Comprobación:
+  `QT_DATA_DIRS=CraftRoot/share run/kio-check-build/mime-apps-check text/plain`
+  (se compila desde `tests/` como `kio-check`). Solo aparecen las aplicaciones
+  con puente; listar todas las de macOS requeriría consultar LaunchServices.
 - El Info.plist tenía vacíos nombre, identificador y versión. Ahora se rellenan.
   Esto podría afectar a la identificación y el foco de la ventana, pero no se ha
   demostrado que fuera la causa ni que el foco esté resuelto.
@@ -187,16 +216,16 @@ Los errores técnicos del instalador y los metadatos se guardan en
 
 Funcionan: navegación, pestañas (se ven pequeñas), vista dividida, copiar,
 pegar, mover arrastrando, renombrar, duplicar, crear carpeta, enviar a la
-papelera y restaurar desde Dolphin.
+papelera y restaurar desde Dolphin. Abrir desde el Dock y "Abrir con" con
+TextEdit y Preview.
 
 ## Pendiente de validar
 
 - Estabilidad de la interfaz en un uso más largo.
-- El registro muestra `mimeType "text/plain" not found`: Dolphin no encuentra la
-  base de datos de tipos MIME, lo que afecta, por ejemplo, a "Abrir con".
+- El diálogo "Otra aplicación…" de "Abrir con" salía vacío. Se añadieron
+  `Categories` a los puentes; falta comprobar que ahora los muestra.
 - Papelera en un disco externo, con un archivo temporal creado en ese disco.
-- Descarga y preparación desde cero en un entorno vacío y acceso desde el Dock.
-- Si conviene corregir o retirar el servicio de launchd instalado por Craft.
+- Descarga y preparación desde cero en un entorno vacío.
 
 ## Preparar una prueba manual de papelera
 

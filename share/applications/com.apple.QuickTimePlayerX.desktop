@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=QuickTime Player
+Comment=Open with QuickTime Player
+Icon=video-x-generic
+Exec=/usr/bin/open -b com.apple.QuickTimePlayerX %F
+MimeType=video/mp4;video/quicktime;video/x-m4v;video/3gpp;
+Terminal=false
+Categories=AudioVideo;Video;Player;
