@@ -25,6 +25,11 @@ Adaptación local del gestor de archivos de KDE: https://invent.kde.org/system/d
   `run/org.freedesktop.dbus-session.plist.original`.
 - `./install-open-with.sh` registra las aplicaciones de macOS para "Abrir con" y
   su diálogo "Otra aplicación…" (ver Incidencias); `--remove` las retira.
+- `python3 install-kio-filter.py` recompila e instala el filtro del diálogo de
+  KIO; `--restore` (o `--restaurar`) recupera la biblioteca anterior y
+  `--recover` (o `--recuperar`) revierte una
+  sustitución interrumpida. Dolphin debe estar cerrado. Una ejecución inicial
+  desde fuentes necesita Python 3.12 o posterior y acceso a la descarga oficial.
 - La versión se define en `dolphin-version.json`. Los scripts comprueban el
   ejecutable antes de modificarlo. Cambiar la versión exige validar también los
   parches: una versión sin `patches/<versión>/` se rechaza explícitamente.
@@ -137,7 +142,7 @@ Los errores técnicos del instalador y los metadatos se guardan en
 - `./comprobar-kio.sh` copia archivos y carpetas, rechaza un conflicto sin alterar
   el destino, mueve, envía a `trash:/` y restaura un archivo temporal propio,
   verificando ruta y contenido. No vacía ninguna papelera.
-- `python3 -m unittest discover -s tests -p 'test_*.py'` pasa cuarenta y tres pruebas de
+- `python3 -m unittest discover -s tests -p 'test_*.py'` ejecuta pruebas de
   instalación, errores claros de JSON/configuración, copias dañadas, metadatos,
   cambios del ejecutable, reversión por fallo y recuperación de una interrupción.
   La preparación inicial con Craft se simula; el despliegue completo y la
@@ -204,8 +209,30 @@ Los errores técnicos del instalador y los metadatos se guardan en
   sustitución que deja intacto el archivo anterior.
   `tests/test_desktop_bridges.py` revisa cada puente de `share/applications/`:
   `Exec=/usr/bin/open -b <bundle id> %F` con el nombre de archivo igual al
-  bundle id, `MimeType` válidos sin duplicados y `Categories`. Si una aplicación
+  bundle id, `MimeType` válidos sin duplicados y categorías asignadas manualmente.
+  Esa exigencia se aplica a los puentes manuales, no a los generados. Si una aplicación
   no está instalada en este Mac solo avisa, sin fallar.
+- El diálogo "Otra aplicación…" filtra por los tipos MIME de los archivos y,
+  cuando se seleccionan varios tipos, presenta las aplicaciones compatibles con
+  todos. Si no existe ninguna aplicación común, el diálogo lo indica. La casilla
+  "Show all applications" permite volver al catálogo completo.
+  Si el tipo no se puede determinar, se conserva el catálogo completo. Preview
+  está asociado también a PDF. La prueba `open-with-dialog-check` ejecuta el
+  diálogo con archivos temporales de texto, PDF y vídeo, incluyendo selecciones
+  múltiples y la opción de mostrar todo. Usa el modo de pruebas de Qt (rutas en
+  `~/.qttest`) con tres aplicaciones de ejemplo propias y su fragmento de menú,
+  en una carpeta y un archivo con nombre único para cada ejecución; nunca
+  sobrescribe un archivo existente y solo borra lo que ha creado. No depende de
+  las aplicaciones ni de los puentes registrados del usuario. Falla con la biblioteca de KIO original sin filtro.
+- El cambio está en `patches/kio-6.31.0/` y se aplica a KIO Widgets, compartida
+  por las aplicaciones de Craft que utilicen ese diálogo. El instalador verifica
+  la versión activa, los símbolos exportados y la prueba del diálogo antes de
+  sustituir la biblioteca; conserva y protege una copia anterior. `setup.sh`
+  reaplica el filtro tras configurar las asociaciones. Si Craft instala una
+  versión distinta de KIO, `setup.sh` avisa y termina sin el filtro; hay que
+  adaptar y comprobar el parche para esa versión. Los demás errores siguen
+  deteniendo la instalación. La instalación desde
+  fuentes en un entorno completamente vacío sigue sin comprobarse.
 - El Info.plist tenía vacíos nombre, identificador y versión. Ahora se rellenan.
   Esto podría afectar a la identificación y el foco de la ventana, pero no se ha
   demostrado que fuera la causa ni que el foco esté resuelto.
@@ -264,3 +291,29 @@ printf 'Prueba de papelera\n' > prueba/codex-verificacion/papelera-prueba.txt
 Enviar únicamente ese archivo a la papelera desde Dolphin y comprobar que puede
 restaurarse, tanto desde Dolphin como desde Finder. No vaciar la papelera.
 Usar nombres nuevos si el archivo de una prueba anterior ya existe.
+
+### Piloto de aplicaciones de macOS
+
+`python3 tools/install-macos-pilot.py` consulta LaunchServices para texto,
+Python, JSON, PDF y MP4 e instala puentes adicionales en
+`~/Applications/Dolphin Open With Pilot`. `--remove` retira el piloto y
+regenera la caché. Los puentes originales se conservan y tienen prioridad en
+caso de identificadores duplicados. El piloto no cambia las asociaciones
+predeterminadas ni garantiza la edición de archivos remotos. Se deben ejecutar
+las órdenes de nuevo para reflejar cambios en las aplicaciones instaladas.
+La selección se limita a las carpetas habituales de aplicaciones; puede omitir
+aplicaciones instaladas en otras ubicaciones. La lista puede incluir programas
+poco habituales porque refleja las asociaciones declaradas a macOS. Los puentes
+generados no incluyen categorías: LaunchServices no proporciona una categoría de
+menú equivalente y no se asigna una sin datos fiables. El menú actual incluye todas
+las aplicaciones sin agruparlas; para un menú agrupado habría que clasificarlas.
+LaunchServices puede devolver varias copias de una aplicación (por ejemplo,
+actualizaciones en carpetas de caché); se descartan las que están fuera de las
+carpetas habituales antes de quedarse con una por identificador. Un bloqueo en
+`run/macos-pilot.lock` impide dos ejecuciones a la vez. Si una ejecución se
+interrumpe, la siguiente revisa las carpetas `~/Applications/.dolphin-pilot-*`:
+recupera los puentes anteriores si no hay otros instalados, borra los restos
+obsoletos (también una carpeta de preparación vacía) y se detiene, indicando la
+ruta, si encuentra contenido ajeno. Tras resolver restos regenera la caché, por
+si la ejecución interrumpida no llegó a hacerlo. Si la regeneración falla,
+se conservan los restos y basta con repetir la orden para volver a intentarlo.
