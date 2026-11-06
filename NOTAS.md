@@ -23,8 +23,8 @@ Adaptación local del gestor de archivos de KDE: https://invent.kde.org/system/d
   desconecta las aplicaciones KDE abiertas. Repetirlo si Craft reinstala su
   paquete de D-Bus. El plist original está en
   `run/org.freedesktop.dbus-session.plist.original`.
-- `./install-open-with.sh` registra las aplicaciones de macOS para "Abrir con"
-  (ver más abajo); `--remove` las retira.
+- `./install-open-with.sh` registra las aplicaciones de macOS para "Abrir con" y
+  su diálogo "Otra aplicación…" (ver Incidencias); `--remove` las retira.
 - La versión se define en `dolphin-version.json`. Los scripts comprueban el
   ejecutable antes de modificarlo. Cambiar la versión exige validar también los
   parches: una versión sin `patches/<versión>/` se rechaza explícitamente.
@@ -136,7 +136,7 @@ Los errores técnicos del instalador y los metadatos se guardan en
 - `./comprobar-kio.sh` copia archivos y carpetas, rechaza un conflicto sin alterar
   el destino, mueve, envía a `trash:/` y restaura un archivo temporal propio,
   verificando ruta y contenido. No vacía ninguna papelera.
-- `python3 -m unittest discover -s tests -p 'test_*.py'` pasa veintiocho pruebas de
+- `python3 -m unittest discover -s tests -p 'test_*.py'` pasa cuarenta y tres pruebas de
   instalación, errores claros de JSON/configuración, copias dañadas, metadatos,
   cambios del ejecutable, reversión por fallo y recuperación de una interrupción.
   La preparación inicial con Craft se simula; el despliegue completo y la
@@ -180,6 +180,31 @@ Los errores técnicos del instalador y los metadatos se guardan en
   `QT_DATA_DIRS=CraftRoot/share run/kio-check-build/mime-apps-check text/plain`
   (se compila desde `tests/` como `kio-check`). Solo aparecen las aplicaciones
   con puente; listar todas las de macOS requeriría consultar LaunchServices.
+- El diálogo "Otra aplicación…" salía vacío aunque el submenú funcionara: su
+  árbol sale de los grupos del menú de KService (`KServiceGroup`), y sin
+  `applications.menu` los puentes no quedaban en ningún grupo.
+  `install-menu.py` (llamado por `install-open-with.sh`) instala el fragmento
+  `~/Library/Preferences/menus/applications-merged/dolphin-open-with.menu` con
+  `<Include><All/></Include>`; las aplicaciones aparecen en la raíz, sin
+  categorías. `mime-apps-check` lista el árbol con los filtros del diálogo:
+  0 aplicaciones sin el fragmento, 5 con él. Comprobado también a mano en Dolphin.
+  El instalador valida los argumentos y herramientas y configura el fragmento
+  antes de modificar enlaces. Si el fragmento es ajeno, ambos modos fallan sin
+  tocar los enlaces. Un fallo posterior puede dejar el menú ya actualizado:
+  el mensaje identifica el paso; corregir la causa y repetir el comando con los
+  mismos argumentos. Los errores de caché quedan en `run/open-with-cache.log`.
+  Las pruebas de `tests/test_open_with.py` cubren esos casos y la repetición de
+  instalación y retirada en directorios temporales, sin tocar la configuración real.
+  `./install-open-with.sh --help` muestra el uso sin necesitar Craft ni cambiar
+  la configuración. El fragmento se escribe mediante sustitución atómica y no
+  se reescribe si ya coincide; la caché se regenera igualmente. Se conservan los
+  permisos existentes y los enlaces simbólicos a fragmentos gestionados. Las
+  pruebas incluyen rutas con espacios y caracteres no ASCII y un fallo de
+  sustitución que deja intacto el archivo anterior.
+  `tests/test_desktop_bridges.py` revisa cada puente de `share/applications/`:
+  `Exec=/usr/bin/open -b <bundle id> %F` con el nombre de archivo igual al
+  bundle id, `MimeType` válidos sin duplicados y `Categories`. Si una aplicación
+  no está instalada en este Mac solo avisa, sin fallar.
 - El Info.plist tenía vacíos nombre, identificador y versión. Ahora se rellenan.
   Esto podría afectar a la identificación y el foco de la ventana, pero no se ha
   demostrado que fuera la causa ni que el foco esté resuelto.
@@ -216,14 +241,12 @@ Los errores técnicos del instalador y los metadatos se guardan en
 
 Funcionan: navegación, pestañas (se ven pequeñas), vista dividida, copiar,
 pegar, mover arrastrando, renombrar, duplicar, crear carpeta, enviar a la
-papelera y restaurar desde Dolphin. Abrir desde el Dock y "Abrir con" con
-TextEdit y Preview.
+papelera y restaurar desde Dolphin. Abrir desde el Dock y "Abrir con" (submenú
+y "Otra aplicación…") con TextEdit, Preview y los reproductores de vídeo.
 
 ## Pendiente de validar
 
 - Estabilidad de la interfaz en un uso más largo.
-- El diálogo "Otra aplicación…" de "Abrir con" salía vacío. Se añadieron
-  `Categories` a los puentes; falta comprobar que ahora los muestra.
 - Papelera en un disco externo, con un archivo temporal creado en ese disco.
 - Descarga y preparación desde cero en un entorno vacío.
 
