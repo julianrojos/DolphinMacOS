@@ -381,3 +381,21 @@ tipos dinámicos, patrones complejos y el tipo genérico
 familia (texto, imagen, audio, vídeo), no un formato verificado. `python3 tools/preview-macos-bridges.py --full-report`
 produce un informe JSON detallado antes de instalar. El instalador usa esta cobertura ampliada por defecto; `--pilot` instala
 únicamente el piloto de cinco extensiones. Los puentes manuales se combinan con los tipos detectados y se restauran al retirar el piloto.
+
+### Tema de iconos WhiteSur
+
+Se instaló la variante azul de WhiteSur en `CraftRoot/share/icons/WhiteSur`,
+preparada a partir del repositorio https://github.com/vinceliuice/WhiteSur-icon-theme
+(revisión `73d8040da51a9ed74e47c7366e7e9ff437601a5c`). La selección
+`[Icons] Theme=WhiteSur` se guarda solo en `dolphinrc`; KDE encontró iconos de
+carpeta, apertura, copia y PDF en el tema. El tema está fuera de Git y habría que
+volver a instalarlo si se elimina `CraftRoot`. Se guardó una copia previa de la
+configuración en `run/dolphinrc-before-whitesur`.
+
+Para volver al tema anterior, cerrar Dolphin y ejecutar:
+
+```sh
+CraftRoot/bin/kwriteconfig6 --file dolphinrc --group Icons --key Theme --delete ''
+```
+
+Al abrir Dolphin de nuevo usará el tema predeterminado de KDE.
