@@ -14,7 +14,7 @@ import tempfile
 
 from dolphin_config import load, read_json, check_version
 from dolphin_install import ensure_closed
-from dolphin_store import Store, collect, deploy, describe, digest, recover, verify_live
+from dolphin_store import Store, deploy, describe, digest, recover, verify_live
 
 KIO_VERSION = "6.31.0"
 SOURCE_URL = f"https://codeload.github.com/KDE/kio/tar.gz/refs/tags/v{KIO_VERSION}"
