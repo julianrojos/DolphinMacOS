@@ -293,6 +293,13 @@ Los errores técnicos del instalador y los metadatos se guardan en
   `KDE.trash` y no puede devolver los archivos; Dolphin sí los restaura.
   Vaciar la papelera desde Finder también borra `KDE.trash`. Lo borrado desde
   Finder no aparece en la papelera de Dolphin.
+- Las filas alternas de la lista salían en gris medio (`#8e8e8e`, la paleta
+  clara del sistema) al abrir Dolphin con el esquema oscuro y se corregían al
+  alternar claro→oscuro. Con trazas temporales se comprobó que
+  `KItemListView::itemChange` sustituía la paleta correcta del elemento
+  (`#1d1f22`) por la de `QGraphicsView`, que aún era la del sistema, y nada la
+  refrescaba después. El parche 0004 usa la paleta del propio elemento. Falta
+  confirmarlo abriendo Dolphin; las trazas ya no están en las fuentes.
 
 ## Fase 2: resultados (2026-11-06, sin Raycast abierto)
 

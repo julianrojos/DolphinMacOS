@@ -1,0 +1,16 @@
+--- a/src/kitemviews/kitemlistview.cpp
++++ b/src/kitemviews/kitemlistview.cpp
+@@ -864,9 +864,10 @@
+ QVariant KItemListView::itemChange(GraphicsItemChange change, const QVariant &value)
+ {
+     if (change == QGraphicsItem::ItemSceneHasChanged && scene()) {
+-        if (!scene()->views().isEmpty()) {
+-            m_styleOption.palette = scene()->views().at(0)->palette();
+-        }
++        // Use the palette of this item, which follows the application's color scheme.
++        // The view's own palette can still be the system one at this point, which
++        // gave alternate rows the system's light gray on dark color schemes.
++        m_styleOption.palette = palette();
+     }
+     return QGraphicsItem::itemChange(change, value);
+ }
