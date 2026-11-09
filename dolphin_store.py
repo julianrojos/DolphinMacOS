@@ -92,8 +92,8 @@ class Store:
         if collect(folder / "tree") != {name: entry for name, entry in manifest.items() if entry is not None}:
             raise RuntimeError("Copia de seguridad dañada: su contenido no coincide con el manifiesto.")
         for relative, entry in manifest.items():
-            actual = describe(safe_path(folder / "tree", relative))
-            if actual != entry:
+            path = safe_path(folder / "tree", relative)
+            if entry is None and describe(path) is not None:
                 raise RuntimeError(f"Copia de seguridad dañada: {relative}")
         return folder / "tree", manifest
 

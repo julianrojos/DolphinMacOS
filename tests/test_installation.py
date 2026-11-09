@@ -1,4 +1,5 @@
 import json
+import hashlib
 import importlib.util
 import io
 import contextlib
@@ -15,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from dolphin_config import Settings, load, read_json, check_version
 import dolphin_install as installer
+import dolphin_store
 real_ensure_closed = installer.ensure_closed
 spec = importlib.util.spec_from_file_location("cleanup", ROOT / "limpiar-copias.py")
 cleanup = importlib.util.module_from_spec(spec)
@@ -65,6 +67,33 @@ class InstallationTests(unittest.TestCase):
         (tree / "lib/library.dylib").write_bytes(b"damaged")
         with self.assertRaisesRegex(RuntimeError, "dañada"):
             self.store.load(first)
+
+    def test_snapshot_load_hashes_each_file_once(self):
+        key = self.store.save(self.tree("single-hash", b"content"))
+        with patch.object(dolphin_store, "digest", wraps=dolphin_store.digest) as digest:
+            _, manifest = self.store.load(key)
+        self.assertEqual(digest.call_count, sum(entry["type"] == "file" for entry in manifest.values()))
+        self.assertEqual(len({call.args[0] for call in digest.call_args_list}), digest.call_count)
+
+    def test_snapshot_load_rejects_directory_at_absent_entry(self):
+        source = self.root / "empty-source"
+        source.mkdir()
+        key = self.store.save(source, {"absent": None})
+        (self.store.root / key / "tree" / "absent").mkdir()
+        with self.assertRaisesRegex(RuntimeError, "Se esperaba un archivo"):
+            self.store.load(key)
+
+    def test_snapshot_load_rejects_absent_entry_through_external_symlink(self):
+        outside = self.root / "outside"
+        outside.mkdir()
+        manifest = {"parent": {"type": "link", "target": str(outside)}, "parent/absent": None}
+        key = hashlib.sha256(json.dumps(manifest, sort_keys=True).encode()).hexdigest()
+        folder = self.store.root / key
+        (folder / "tree").mkdir(parents=True)
+        (folder / "tree" / "parent").symlink_to(outside, target_is_directory=True)
+        write_json(folder / "manifest.json", manifest)
+        with self.assertRaisesRegex(RuntimeError, "sale de la instalación"):
+            self.store.load(key)
 
     def test_deploy_replaces_executable_libraries_plugins_and_metadata(self):
         state, _, modified = self.managed_install()
