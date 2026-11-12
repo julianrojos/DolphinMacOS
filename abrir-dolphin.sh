@@ -33,7 +33,7 @@ mkdir -p "$RUN_DIR"
 export QT_DATA_DIRS="$CRAFT_ROOT/share${QT_DATA_DIRS:+:$QT_DATA_DIRS}"
 log_file="$(mktemp "$RUN_DIR/dolphin.log.XXXXXXXX")"
 nohup "$SESSION" --dbus-daemon="$DAEMON" --config-file="$CONFIG" -- \
-    "$APP" "${1:-$HOME}" > "$log_file" 2>&1 &
+    "$APP" "$@" > "$log_file" 2>&1 &
 session_pid=$!
 sleep 2
 if ! kill -0 "$session_pid" 2>/dev/null; then
