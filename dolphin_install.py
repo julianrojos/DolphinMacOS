@@ -133,7 +133,21 @@ def ensure_patch(settings, enabled):
                                "no está ni aplicado ni pendiente.")
 
 
-def build_artifact(settings, store, patched):
+def require_session_test_build(settings):
+    cache = settings.build / "CMakeCache.txt"
+    try:
+        lines = cache.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError) as error:
+        raise RuntimeError(f"Cannot read the CMake build configuration at {cache}: {error}. "
+                           "Configure the build and check the file's permissions and UTF-8 encoding.") from error
+    values = [line.split("=", 1)[1].strip().upper() for line in lines if line.startswith("BUILD_TESTING:BOOL=")]
+    if not values or values[-1] not in {"ON", "TRUE", "YES", "Y", "1"}:
+        raise RuntimeError("Session integration tests require BUILD_TESTING=ON. Enable it or explicitly use --skip-session-test.")
+
+
+def build_artifact(settings, store, patched, *, skip_session_test=False):
+    if patched and not skip_session_test:
+        require_session_test_build(settings)
     ensure_patch(settings, patched)
     cmake = settings.craft / "dev-utils/bin/cmake"
     phase = "corregido" if patched else "sin-parche"
@@ -146,6 +160,11 @@ def build_artifact(settings, store, patched):
         if patched:
             run(sys.executable, settings.root / "tests/comprobar-accesibilidad.py", "--library",
                 settings.build / "bin/libdolphinprivate.6.dylib")
+            if not skip_session_test:
+                try:
+                    run(sys.executable, settings.root / "tests/session-restore-check.py")
+                except subprocess.CalledProcessError as error:
+                    raise RuntimeError("Session integration test failed; deployment was stopped. Fix the test environment or explicitly retry with --skip-session-test.") from error
         with tempfile.TemporaryDirectory(prefix="dolphin-stage-") as directory:
             run(cmake, "--install", settings.build, "--prefix", settings.craft,
                 env=dict(os.environ, DESTDIR=directory), stdout=output, stderr=subprocess.STDOUT)
@@ -179,7 +198,10 @@ def main(argv=None):
     group.add_argument("--restaurar-metadatos", action="store_true")
     group.add_argument("--recuperar", action="store_true", help="Revertir una sustitución interrumpida")
     group.add_argument("--reinstalar", action="store_true", help="Reconstruir desde fuentes aunque Craft haya cambiado la instalación; conserva una copia previa")
+    parser.add_argument("--skip-session-test", action="store_true", help="Skip only the session integration test when rebuilding")
     args = parser.parse_args(argv)
+    if args.skip_session_test and (args.recuperar or args.restaurar or args.metadatos or args.restaurar_metadatos):
+        parser.error("--skip-session-test is only available when rebuilding Dolphin")
     settings = load()
     settings.backups.mkdir(parents=True, exist_ok=True)
     with (settings.backups / "instalacion.lock").open("a") as lock:
@@ -227,9 +249,13 @@ def main(argv=None):
                     target = store.save(tree)
         else:
             validate_sources(settings)
+            if args.skip_session_test:
+                print("Warning: skipping the session integration test; all other checks remain enabled.", file=sys.stderr)
+            else:
+                require_session_test_build(settings)
             # El original se genera desde fuentes sin el parche, nunca desde lo instalado.
             baseline = build_artifact(settings, store, False)
-            target = build_artifact(settings, store, True)
+            target = build_artifact(settings, store, True, skip_session_test=args.skip_session_test)
         _, clean = store.load(baseline)
         _, updated = store.load(target)
         managed = set(clean) | set(updated) | set(state["managed"] if state else [])

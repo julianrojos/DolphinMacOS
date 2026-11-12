@@ -1,0 +1,100 @@
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -37,6 +37,13 @@
+ #include <QDBusConnection>
+ #include <QDBusConnectionInterface>
+ #include <QSessionManager>
++#ifdef BUILD_TESTING
++#include <QDir>
++#include <QFile>
++#include <QFileInfo>
++#include <QStandardPaths>
++#include <QTabWidget>
++#endif
+ #include <QTimer>
+ 
+ #if HAVE_X11
+@@ -46,10 +53,42 @@
+ #ifndef Q_OS_WIN
+ #include <unistd.h>
+ #endif
++#include <algorithm>
+ #include <iostream>
+ 
+ constexpr auto dolphinTranslationDomain{"dolphin"};
+ 
++#ifdef BUILD_TESTING
++static bool sessionTestProfileIsIsolated()
++{
++    const auto root = QFileInfo(qEnvironmentVariable("DOLPHIN_SESSION_TEST_ROOT")).canonicalFilePath();
++    const auto token = qgetenv("DOLPHIN_SESSION_TEST_TOKEN");
++    if (root.isEmpty() || !QFileInfo(root).isDir() || token.size() != 64
++        || !std::all_of(token.cbegin(), token.cend(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); })) {
++        return false;
++    }
++    if (QFileInfo(root).dir().canonicalPath() != QFileInfo(QDir::tempPath()).canonicalFilePath()
++        || !QFileInfo(root).fileName().startsWith(QLatin1String("dolphin-session-test-"))) {
++        return false;
++    }
++    for (const auto *name : {"HOME", "CFFIXED_USER_HOME"}) {
++        if (qEnvironmentVariableIsEmpty(name) || QFileInfo(qEnvironmentVariable(name)).canonicalFilePath() != root) {
++            return false;
++        }
++    }
++    const auto expectedConfig = root + QStringLiteral("/Library/Preferences");
++    const auto config = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation);
++    if (QFileInfo(config).canonicalFilePath() != expectedConfig) {
++        return false;
++    }
++    const auto markerPath = root + QStringLiteral("/.session-test-profile");
++    const QFileInfo markerInfo(markerPath);
++    QFile marker(markerPath);
++    return !markerInfo.isSymLink() && markerInfo.isFile() && marker.open(QIODevice::ReadOnly)
++        && marker.readAll() == token;
++}
++#endif
++
+ int main(int argc, char **argv)
+ {
+ #ifndef Q_OS_WIN
+@@ -147,11 +186,20 @@
+     {
+         QCommandLineOption selfTestOption(QStringLiteral("self-test"));
+         parser.addOption(selfTestOption);
++        parser.addOption(QCommandLineOption(QStringLiteral("session-test")));
+     }
+ #endif
+     parser.addPositionalArgument(QStringLiteral("+[Url]"), i18nc("@info:shell", "Document to open"));
+ 
+     parser.process(app);
++#ifdef BUILD_TESTING
++    // Reject unsafe test invocations before reading session settings or contacting instances.
++    if (parser.isSet(QStringLiteral("session-test"))
++        && (parser.isSet(QStringLiteral("self-test")) || parser.isSet(QStringLiteral("daemon")) || !sessionTestProfileIsIsolated())) {
++        std::cerr << "Session test requires a verified temporary profile and a dedicated invocation." << std::endl;
++        return EXIT_FAILURE;
++    }
++#endif
+     aboutData.processCommandLine(&parser);
+ 
+     const bool splitView = parser.isSet(QStringLiteral("split")) || GeneralSettings::splitView();
+@@ -304,6 +352,19 @@
+ #endif
+ 
+ #ifdef BUILD_TESTING
++    if (parser.isSet(QStringLiteral("session-test"))) {
++        const auto extraUrls = qEnvironmentVariable("DOLPHIN_SESSION_TEST_ADD_URLS").split(QLatin1Char('\n'), Qt::SkipEmptyParts);
++        if (!extraUrls.isEmpty()) {
++            mainWindow->openDirectories(extraUrls, false);
++        }
++        const auto *tabs = mainWindow->findChild<QTabWidget *>(QStringLiteral("tabWidget"));
++        std::cout << "DOLPHIN_SESSION_TEST_TAB_COUNT=" << (tabs ? tabs->count() : -1) << std::endl;
++        const auto testUrls = qEnvironmentVariable("DOLPHIN_SESSION_TEST_URLS").split(QLatin1Char('\n'), Qt::SkipEmptyParts);
++        for (const auto &url : testUrls) {
++            std::cout << "DOLPHIN_SESSION_TEST_URL_OPEN=" << mainWindow->isUrlOpen(url) << std::endl;
++        }
++        QTimer::singleShot(std::chrono::milliseconds(500), mainWindow, &QWidget::close);
++    }
+     if (parser.isSet(QStringLiteral("self-test"))) {
+         QTimer::singleShot(std::chrono::milliseconds(500), &app, &QCoreApplication::quit);
+     }

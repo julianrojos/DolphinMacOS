@@ -1,0 +1,34 @@
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -246,9 +246,30 @@
+     // 3. There is a session available to restore
+     if (app.isSessionRestored() || GeneralSettings::rememberOpenedTabs()) {
+         // Get saved state data for the last-closed Dolphin instance
++#ifdef Q_OS_MACOS
++        // Count services without calling other windows, which may be unresponsive.
++        // The current window exists even when its D-Bus object is unavailable.
++        bool restoreSession = true;
++        if (!app.isSessionRestored()) {
++            if (auto *bus = QDBusConnection::sessionBus().interface()) {
++                const auto services = bus->registeredServiceNames();
++                if (services.isValid()) {
++                    const auto ownService = QStringLiteral("org.kde.dolphin-%1").arg(QCoreApplication::applicationPid());
++                    for (const auto &service : services.value()) {
++                        if (service.startsWith(QLatin1String("org.kde.dolphin-")) && service != ownService) {
++                            restoreSession = false;
++                            break;
++                        }
++                    }
++                }
++            }
++        }
++#else
+         const QString serviceName = QStringLiteral("org.kde.dolphin-%1").arg(QCoreApplication::applicationPid());
+         const auto instancesCount = Dolphin::dolphinGuiInstances(serviceName).size();
+-        if (instancesCount == 1 || (app.isSessionRestored() && instancesCount > 0)) {
++        const bool restoreSession = instancesCount == 1 || (app.isSessionRestored() && instancesCount > 0);
++#endif
++        if (restoreSession) {
+             const QString className = KXmlGuiWindow::classNameOfToplevel(1);
+             if (className == QLatin1String("DolphinMainWindow")) {
+                 mainWindow->restore(1);

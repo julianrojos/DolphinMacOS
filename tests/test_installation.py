@@ -363,6 +363,7 @@ craft() {
         modified_exe.write_bytes(b"changed by Craft")
         before = collect(self.craft)
         with patch.object(installer, "load", return_value=self.settings), patch.object(installer, "validate_sources"), \
+             patch.object(installer, "require_session_test_build"), \
              patch.object(installer, "build_artifact", side_effect=[state["baseline"], state["installed"]]), \
              patch.object(installer, "run"), patch.object(installer, "check_version"):
             installer.main(["--reinstalar"])
@@ -375,6 +376,7 @@ craft() {
         before, old_state = collect(self.craft), self.state_path.read_bytes()
         opened = RuntimeError("Dolphin está abierto.")
         with patch.object(installer, "load", return_value=self.settings), patch.object(installer, "validate_sources"), \
+             patch.object(installer, "require_session_test_build"), \
              patch.object(installer, "build_artifact", side_effect=[state["baseline"], state["installed"]]), \
              patch.object(installer, "ensure_closed", side_effect=[None, opened]), \
              patch.object(installer, "deploy") as deploy:
@@ -383,6 +385,77 @@ craft() {
             deploy.assert_not_called()
         self.assertEqual(collect(self.craft), before)
         self.assertEqual(self.state_path.read_bytes(), old_state)
+
+    def test_session_test_preflight_stops_before_any_build(self):
+        self.settings.build.mkdir(parents=True)
+        (self.settings.build / "CMakeCache.txt").write_text("BUILD_TESTING:BOOL=OFF\n")
+        with patch.object(installer, "load", return_value=self.settings), patch.object(installer, "validate_sources"), \
+             patch.object(installer, "build_artifact") as build:
+            with self.assertRaisesRegex(RuntimeError, "BUILD_TESTING=ON"):
+                installer.main([])
+            build.assert_not_called()
+
+    def test_missing_session_test_configuration_stops_before_source_changes(self):
+        cache = self.settings.build / "CMakeCache.txt"
+        with patch.object(installer, "ensure_patch") as ensure_patch, patch.object(installer, "run") as run:
+            with self.assertRaises(RuntimeError) as caught:
+                installer.build_artifact(self.settings, self.store, True)
+            self.assertIn(str(cache), str(caught.exception))
+            self.assertIn("Configure the build", str(caught.exception))
+            self.assertIsInstance(caught.exception.__cause__, FileNotFoundError)
+            ensure_patch.assert_not_called()
+            run.assert_not_called()
+
+    def test_unreadable_session_test_configuration_preserves_error_cause(self):
+        errors = (PermissionError("permission denied"), UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid byte"))
+        for error in errors:
+            with self.subTest(error=type(error).__name__), patch.object(Path, "read_text", side_effect=error):
+                with self.assertRaises(RuntimeError) as caught:
+                    installer.require_session_test_build(self.settings)
+                self.assertIn(str(self.settings.build / "CMakeCache.txt"), str(caught.exception))
+                self.assertIs(caught.exception.__cause__, error)
+
+    def test_explicit_session_test_skip_warns_and_allows_rebuild(self):
+        state, _, _ = self.managed_install()
+        with patch.object(installer, "load", return_value=self.settings), patch.object(installer, "validate_sources"), \
+             patch.object(installer, "require_session_test_build") as preflight, \
+             patch.object(installer, "build_artifact", side_effect=[state["baseline"], state["installed"]]) as build, \
+             patch.object(installer, "run"), patch.object(installer, "check_version"), \
+             contextlib.redirect_stderr(io.StringIO()) as output:
+            installer.main(["--skip-session-test"])
+            self.assertIn("all other checks remain enabled", output.getvalue())
+            preflight.assert_not_called()
+            self.assertEqual(build.call_args.kwargs, {"skip_session_test": True})
+
+    def test_skip_session_test_is_rejected_with_modes_that_do_not_rebuild(self):
+        state, _, _ = self.managed_install()
+        before, old_state = collect(self.craft), self.state_path.read_bytes()
+        for mode in ("--recuperar", "--restaurar", "--metadatos", "--restaurar-metadatos"):
+            with self.subTest(mode=mode), patch.object(installer, "load") as load, \
+                 patch.object(installer, "build_artifact") as build, patch.object(installer, "deploy") as deploy, \
+                 contextlib.redirect_stderr(io.StringIO()) as output:
+                with self.assertRaises(SystemExit) as caught:
+                    installer.main([mode, "--skip-session-test"])
+                self.assertEqual(caught.exception.code, 2)
+                self.assertIn("only available when rebuilding", output.getvalue())
+                load.assert_not_called()
+                build.assert_not_called()
+                deploy.assert_not_called()
+                self.assertEqual(collect(self.craft), before)
+                self.assertEqual(self.state_path.read_bytes(), old_state)
+
+    def test_session_test_failure_stops_before_staging(self):
+        self.settings.build.mkdir(parents=True)
+        (self.settings.build / "CMakeCache.txt").write_text("BUILD_TESTING:BOOL=ON\n")
+        def fail_session(*args, **kwargs):
+            if str(args[1]).endswith("session-restore-check.py"):
+                raise subprocess.CalledProcessError(1, args)
+        with patch.object(installer, "ensure_patch"), patch.object(installer, "run", side_effect=fail_session) as run, \
+             patch.object(self.store, "save") as save:
+            with self.assertRaisesRegex(RuntimeError, "deployment was stopped"):
+                installer.build_artifact(self.settings, self.store, True)
+            save.assert_not_called()
+            self.assertFalse(any("--install" in call.args for call in run.call_args_list))
 
     def test_cleanup_initial_migration_protects_every_existing_copy(self):
         self.managed_install()
