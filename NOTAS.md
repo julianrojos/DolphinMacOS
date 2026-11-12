@@ -15,7 +15,10 @@ Adaptación local del gestor de archivos de KDE: https://invent.kde.org/system/d
   (`CraftRoot/Applications/KDE/dolphin.app`) gracias a `fix-dbus-service.sh`
   y al `LSEnvironment` del Info.plist (ver Incidencias).
 - `./abrir-dolphin.sh [carpeta]` abre Dolphin con una sesión D-Bus privada y
-  genera un registro independiente en `run/`. Útil para depurar. Detecta si el
+  genera un registro independiente en `run/`. Sin argumentos deja que Dolphin
+  restaure la sesión o use su ubicación de inicio configurada, sin añadir la
+  carpeta personal. Si se indica una carpeta, la pasa explícitamente a Dolphin.
+  Útil para depurar. Detecta si el
   proceso termina en los dos primeros segundos; que siga activo no demuestra
   que haya una ventana funcional.
 - `./fix-dbus-service.sh` corrige y recarga el servicio D-Bus de launchd que
@@ -154,6 +157,27 @@ Los errores técnicos del instalador y los metadatos se guardan en
 - `./comprobar-kio.sh` copia archivos y carpetas, rechaza un conflicto sin alterar
   el destino, mueve, envía a `trash:/` y restaura un archivo temporal propio,
   verificando ruta y contenido. No vacía ninguna papelera.
+- `python3 tests/session-restore-check.py` usa la compilación local con un perfil
+  temporal y D-Bus privado. Comprueba el inicio sin sesión; después Dolphin abre
+  dos carpetas, guarda su sesión al cerrar la ventana y recupera ambas rutas al
+  arrancar de nuevo. También comprueba que otra instancia abierta impide volver
+  a restaurarlas. El instalador la ejecuta después de compilar la versión
+  corregida, antes de desplegarla; comprueba `BUILD_TESTING=ON` antes de comenzar
+  la compilación. `python3 parchear-dolphin.py --skip-session-test` permite
+  omitir solo esta prueba de integración al reconstruir, con un aviso; los demás
+  controles permanecen activos. Los fallos nunca se ignoran automáticamente.
+  Tanto el script como el modo `--session-test` del ejecutable exigen un perfil
+  temporal marcado y verifican que Qt use ese perfil. Dolphin rechaza ese modo
+  sin aislamiento antes de abrir ventanas o contactar con otras instancias.
+  `--self-test` conserva su salida habitual sin cerrar la ventana para guardar
+  la sesión y no procesa las variables de la prueba de sesión. No
+  sustituye la comprobación manual del cierre y la apertura desde el Dock.
+  Después de instalar o actualizar Dolphin, conviene ejecutar
+  `python3 tests/session-restore-check.py --installed` para comprobar también
+  el guardado y la restauración de pestañas con el ejecutable instalado, usando
+  el mismo aislamiento temporal. Esta comprobación es adicional a la que hace
+  el instalador antes del despliegue; la coincidencia de los archivos instalados
+  con el artefacto ya se verifica durante el despliegue.
 - `python3 -m unittest discover -s tests -p 'test_*.py'` ejecuta pruebas de
   instalación, errores claros de JSON/configuración, copias dañadas, metadatos,
   cambios del ejecutable, reversión por fallo y recuperación de una interrupción.
@@ -301,6 +325,15 @@ Los errores técnicos del instalador y los metadatos se guardan en
   refrescaba después. El parche 0004 usa la paleta del propio elemento. Confirmado
   abriendo Dolphin: las filas alternas salen bien desde el arranque. Las trazas
   ya no están en las fuentes.
+- La restauración de pestañas dependía de contar la propia ventana mediante su
+  interfaz D-Bus. En una prueba aislada de macOS la interfaz no estaba disponible
+  aunque el servicio sí se había registrado. El parche 0005 cuenta la instancia
+  actual y consulta los servicios de otras instancias para evitar restaurar la
+  misma sesión en una nueva ventana. En macOS no consulta las ventanas de otras
+  instancias, que podrían estar bloqueadas; en otras plataformas conserva el
+  criterio original. El arranque simultáneo de dos procesos sigue teniendo una
+  posible carrera: ambos podrían ver al otro y omitir la restauración. La prueba
+  de otra instancia abierta verifica el arranque secuencial.
 
 ## Fase 2: resultados (2026-11-06, sin Raycast abierto)
 
