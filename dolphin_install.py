@@ -160,6 +160,8 @@ def build_artifact(settings, store, patched, *, skip_session_test=False):
         if patched:
             run(sys.executable, settings.root / "tests/comprobar-accesibilidad.py", "--library",
                 settings.build / "bin/libdolphinprivate.6.dylib")
+            if (settings.patch_dir / "0007-macos-quick-look.patch").is_file():
+                run(sys.executable, settings.root / "tests/check-quicklook-selection.py")
             if not skip_session_test:
                 try:
                     run(sys.executable, settings.root / "tests/session-restore-check.py")

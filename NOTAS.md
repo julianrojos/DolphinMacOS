@@ -433,3 +433,20 @@ CraftRoot/bin/kwriteconfig6 --file dolphinrc --group Icons --key Theme --delete 
 ```
 
 Al abrir Dolphin de nuevo usará el tema predeterminado de KDE.
+
+## Quick Look con la barra espaciadora
+
+El parche `0007-macos-quick-look.patch` añade la vista previa nativa de macOS (`QLPreviewPanel`) en un puente Objective-C++ (`src/quicklook_macos.mm`):
+
+- Espacio abre y cierra la vista previa de los elementos seleccionados. Esc también la cierra cuando la lista de archivos tiene el foco; los campos de edición y búsqueda conservan su propio comportamiento de Esc.
+- Las flechas permiten mover la selección en Dolphin mientras el panel está abierto; el panel reenvía las flechas que recibe a la ventana de Dolphin. La vista previa se actualiza al cambiar la selección, la vista dividida o la pestaña.
+- Si la selección queda vacía, espera 350 ms antes de cerrar el panel. Si aparece otra selección durante ese plazo, actualiza la vista previa y descarta el cierre pendiente.
+- Solo archivos locales (incluidos los montajes SMB de macOS). En `sftp://` y similares Dolphin muestra un aviso; en una selección mixta avisa de que solo mostrará los elementos locales.
+- El modo selección ya no tiene atajo de teclado (Ctrl+Espacio se usa dentro de ese modo para marcar elementos); sigue disponible en el menú y la barra de herramientas.
+- Si la barra espaciadora no responde, puede haber un atajo guardado por el usuario para `toggle_selection_mode`: se corrige en Preferencias > Atajos de teclado.
+
+`python3 tests/check-quicklook-selection.py` compila los métodos reales de actualización y cierre con un panel simulado. Comprueba la selección vacía transitoria y persistente, y que un temporizador antiguo no cierre una vista previa reabierta. El instalador ejecuta esta prueba tras compilar el parche `0007`.
+
+El panel obtiene el controlador mediante la cadena de respuesta de macOS. `python3 tests/check-quicklook-native.py` compila el puente real en una aplicación Qt temporal y comprueba la adquisición del panel, el cambio de ventana, el reenvío de las cuatro flechas y su cierre y reapertura. Necesita una sesión gráfica activa; no forma parte de la instalación automática. Una versión anterior de la prueba pasó; la versión actual no ha completado el recorrido porque la aplicación de prueba perdió el foco antes de comprobar la reapertura.
+
+Queda pendiente comprobar visualmente en Dolphin el teclado, Esc durante una edición, las selecciones mixtas, la vista dividida y los cambios de pestaña. La prueba nativa aislada no sustituye esas comprobaciones.

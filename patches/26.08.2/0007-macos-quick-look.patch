@@ -1,0 +1,515 @@
+--- a/src/dolphinmainwindow.cpp
++++ b/src/dolphinmainwindow.cpp
+@@ -38,6 +38,9 @@
+ #include "views/dolphinviewactionhandler.h"
+ #include "views/draganddrophelper.h"
+ #include "views/viewproperties.h"
++#ifdef Q_OS_MACOS
++#include "quicklook_macos.h"
++#endif
+ 
+ #include <KActionCollection>
+ #include <KActionMenu>
+@@ -254,6 +257,9 @@
+     auto *middleClickEventFilter = new MiddleClickActionEventFilter(this);
+     connect(middleClickEventFilter, &MiddleClickActionEventFilter::actionMiddleClicked, this, &DolphinMainWindow::slotToolBarActionMiddleClicked);
+     toolBar()->installEventFilter(middleClickEventFilter);
++#ifdef Q_OS_MACOS
++    qApp->installEventFilter(this);
++#endif
+ 
+     setupWhatsThis();
+ 
+@@ -271,6 +277,10 @@
+ 
+ DolphinMainWindow::~DolphinMainWindow()
+ {
++#ifdef Q_OS_MACOS
++    closeQuickLook();
++#endif
++
+     // This fixes a crash on Wayland when closing the mainwindow while another dialog is open.
+     disconnect(QGuiApplication::clipboard(), &QClipboard::dataChanged, this, &DolphinMainWindow::updatePasteAction);
+ 
+@@ -423,6 +433,10 @@
+     }
+ 
+     Q_EMIT selectionChanged(selection);
++
++#ifdef Q_OS_MACOS
++    updateQuickLook();
++#endif
+ }
+ 
+ void DolphinMainWindow::updateHistory()
+@@ -1172,8 +1186,85 @@
+ 
+     m_activeViewContainer->setSelectionModeEnabled(checked, actionCollection(), SelectionMode::BottomBar::Contents::GeneralContents);
+     actionCollection()->action(QStringLiteral("toggle_selection_mode"))->setChecked(checked);
++}
++
++#ifdef Q_OS_MACOS
++QList<QUrl> DolphinMainWindow::localSelectedUrls() const
++{
++    QList<QUrl> urls;
++    const KFileItemList selection = m_activeViewContainer->view()->selectedItems();
++    for (const KFileItem &item : selection) {
++        const QUrl url = item.targetUrl();
++        if (url.isLocalFile()) {
++            urls.append(url);
++        }
++    }
++    return urls;
++}
++
++void DolphinMainWindow::toggleQuickLook()
++{
++    if (DolphinQuickLook::isVisible(this)) {
++        closeQuickLook();
++        return;
++    }
++
++    const int selectedCount = m_activeViewContainer->view()->selectedItems().count();
++    if (selectedCount == 0) {
++        return;
++    }
++    const QList<QUrl> urls = localSelectedUrls();
++    if (urls.isEmpty()) {
++        m_activeViewContainer->showMessage(i18nc("@info:status", "Quick Look is only available for files on this Mac."), KMessageWidget::Information);
++        return;
++    }
++    if (urls.count() != selectedCount) {
++        m_activeViewContainer->showMessage(i18nc("@info:status", "Quick Look can only preview the local items in this selection."), KMessageWidget::Information);
++    }
++    ++m_quickLookSelectionGeneration;
++    DolphinQuickLook::show(urls, this);
++}
++
++void DolphinMainWindow::updateQuickLook()
++{
++    const auto generation = ++m_quickLookSelectionGeneration;
++    if (!DolphinQuickLook::isVisible(this)) {
++        return;
++    }
++    const auto urls = localSelectedUrls();
++    if (!urls.isEmpty()) {
++        DolphinQuickLook::update(urls, this);
++        return;
++    }
++    // A folder refresh can briefly clear the selection. Confirm it remains empty.
++    QTimer::singleShot(350, this, [this, generation] {
++        if (generation == m_quickLookSelectionGeneration) {
++            DolphinQuickLook::update(localSelectedUrls(), this);
++        }
++    });
+ }
+ 
++bool DolphinMainWindow::eventFilter(QObject *watched, QEvent *event)
++{
++    // Escape only closes the preview while it is shown. It is consumed here, before it reaches
++    // the focused widget, so it does not also clear the selection or leave the selection mode.
++    // Leave Escape to text editors, search fields and other focused controls.
++    // The state is checked when the key arrives, so a panel closed by its own button is not an issue.
++    if (event->type() == QEvent::KeyPress && static_cast<QKeyEvent *>(event)->key() == Qt::Key_Escape && isActiveWindow()
++        && m_activeViewContainer && !m_activeViewContainer->view()->handleSpaceAsNormalKey() && DolphinQuickLook::isVisible(this)) {
++        closeQuickLook();
++        return true;
++    }
++    return KXmlGuiWindow::eventFilter(watched, event);
++}
++
++void DolphinMainWindow::closeQuickLook()
++{
++    ++m_quickLookSelectionGeneration;
++    DolphinQuickLook::close(this);
++}
++#endif
++
+ void DolphinMainWindow::showFilterBar()
+ {
+     m_activeViewContainer->setFilterBarVisible(true);
+@@ -1702,6 +1793,10 @@
+     const QUrl url = viewContainer->url();
+     Q_EMIT urlChanged(url);
+     Q_EMIT selectionChanged(m_activeViewContainer->view()->selectedItems());
++
++#ifdef Q_OS_MACOS
++    updateQuickLook();
++#endif
+ }
+ 
+ void DolphinMainWindow::tabCountChanged(int count)
+@@ -1975,7 +2070,16 @@
+         "</para>"));
+     toggleSelectionModeAction->setIcon(QIcon::fromTheme(QStringLiteral("quickwizard")));
+     toggleSelectionModeAction->setCheckable(true);
++#ifdef Q_OS_MACOS
++    // Space opens Quick Look like in Finder. Ctrl+Space already selects the current item in selection mode.
++    QAction *quickLookAction = actionCollection()->addAction(QStringLiteral("quick_look"));
++    quickLookAction->setText(i18nc("@action:inmenu", "Quick Look"));
++    quickLookAction->setIcon(QIcon::fromTheme(QStringLiteral("view-preview")));
++    actionCollection()->setDefaultShortcut(quickLookAction, Qt::Key_Space);
++    connect(quickLookAction, &QAction::triggered, this, &DolphinMainWindow::toggleQuickLook);
++#else
+     actionCollection()->setDefaultShortcut(toggleSelectionModeAction, Qt::Key_Space);
++#endif
+     connect(toggleSelectionModeAction, &QAction::triggered, this, &DolphinMainWindow::toggleSelectionMode);
+ 
+     // A special version of the toggleSelectionModeAction for the toolbar that also contains a menu
+--- a/src/dolphinmainwindow.h
++++ b/src/dolphinmainwindow.h
+@@ -270,6 +270,11 @@
+ protected:
+     /** @see QObject::event() */
+     bool event(QEvent *event) override;
++
++#ifdef Q_OS_MACOS
++    /** @see QObject::eventFilter(). Lets Escape close the Quick Look panel. */
++    bool eventFilter(QObject *watched, QEvent *event) override;
++#endif
+ 
+     /** @see QWidget::showEvent() */
+     void showEvent(QShowEvent *event) override;
+@@ -404,6 +409,11 @@
+     void disableStopAction();
+ 
+     void toggleSelectionMode();
++
++#ifdef Q_OS_MACOS
++    /** Shows or hides the Quick Look panel for the selected items. */
++    void toggleQuickLook();
++#endif
+ 
+     void showFilterBar();
+     void toggleFilterBar();
+@@ -736,7 +746,18 @@
+     void updateNavigatorsBackground();
+ 
+     bool isKompareInstalled() const;
++
++#ifdef Q_OS_MACOS
++    /** @return the local files among the items selected in the active view. */
++    QList<QUrl> localSelectedUrls() const;
+ 
++    /** Refreshes the Quick Look panel of this window after the selection or the active view changed. */
++    void updateQuickLook();
++
++    /** Hides the Quick Look panel if this window owns it. */
++    void closeQuickLook();
++#endif
++
+     /**
+      * Creates an action for showing/hiding a panel, that is accessible
+      * in "Configure toolbars..." and "Configure shortcuts...".
+@@ -779,6 +800,9 @@
+     KNewFileMenu *m_newFileMenu;
+     DolphinTabWidget *m_tabWidget;
+     DolphinViewContainer *m_activeViewContainer;
++#ifdef Q_OS_MACOS
++    quint64 m_quickLookSelectionGeneration = 0;
++#endif
+ 
+     DolphinViewActionHandler *m_actionHandler;
+     DolphinRemoteEncoding *m_remoteEncoding;
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -458,7 +458,17 @@
+         userfeedback/settingsdatasource.h
+         userfeedback/placesdatasource.h
+         settings/userfeedback/userfeedbacksettingspage.h
++    )
++endif()
++
++if(APPLE)
++    enable_language(OBJCXX)
++    target_sources(dolphinstatic PRIVATE
++        quicklook_macos.mm
++        quicklook_macos.h
+     )
++    set_source_files_properties(quicklook_macos.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
++    target_link_libraries(dolphinstatic "-framework AppKit" "-framework QuickLookUI")
+ endif()
+ 
+ if(KF6KIO_VERSION VERSION_GREATER_EQUAL "6.24.0")
+--- /dev/null
++++ b/src/quicklook_macos.h
+@@ -0,0 +1,38 @@
++/*
++    SPDX-FileCopyrightText: 2026 Dolphin macOS contributors
++    SPDX-License-Identifier: GPL-2.0-or-later
++*/
++
++#ifndef DOLPHIN_QUICKLOOK_MACOS_H
++#define DOLPHIN_QUICKLOOK_MACOS_H
++
++#include <QList>
++#include <QUrl>
++
++class QWidget;
++
++/**
++ * Shows the native macOS Quick Look panel for local files.
++ *
++ * Arrow keys received by the panel are forwarded to the owning window, and
++ * the caller refreshes the preview when the selection changes.
++ *
++ * There is a single panel for the whole application. The @p owner is the Qt
++ * window using it, so another window cannot close or update its preview.
++ */
++namespace DolphinQuickLook
++{
++/** @return true if the Quick Look panel is on screen and belongs to @p owner. */
++bool isVisible(const QWidget *owner);
++
++/** Shows the panel for @p files, taking it over from any other owner. Nothing happens if @p files is empty. */
++void show(const QList<QUrl> &files, QWidget *owner);
++
++/** Replaces the previewed files if the panel is visible and belongs to @p owner. Closes it if @p files is empty. */
++void update(const QList<QUrl> &files, const QWidget *owner);
++
++/** Hides the panel if it belongs to @p owner. */
++void close(const QWidget *owner);
++}
++
++#endif
+--- /dev/null
++++ b/src/quicklook_macos.mm
+@@ -0,0 +1,238 @@
++/*
++    SPDX-FileCopyrightText: 2026 Dolphin macOS contributors
++    SPDX-License-Identifier: GPL-2.0-or-later
++*/
++
++#include "quicklook_macos.h"
++#include <QElapsedTimer>
++#include <QTimer>
++#include <QWidget>
++
++#import <AppKit/AppKit.h>
++#import <QuickLookUI/QuickLookUI.h>
++
++@interface DolphinQuickLookSource : NSResponder <QLPreviewPanelDataSource, QLPreviewPanelDelegate>
++@property(nonatomic, strong) NSArray<NSURL *> *urls;
++@property(nonatomic, weak) NSWindow *window;
++@property(nonatomic, weak) NSResponder *previousResponder;
++@property(nonatomic) BOOL enabled;
++@end
++
++@implementation DolphinQuickLookSource
++- (BOOL)acceptsPreviewPanelControl:(QLPreviewPanel *)panel
++{
++    return self.enabled;
++}
++
++- (void)beginPreviewPanelControl:(QLPreviewPanel *)panel
++{
++    panel.dataSource = self;
++    panel.delegate = self;
++    [panel reloadData];
++}
++
++- (void)endPreviewPanelControl:(QLPreviewPanel *)panel
++{
++    if (panel.dataSource == self) {
++        panel.dataSource = nil;
++    }
++    if (panel.delegate == self) {
++        panel.delegate = nil;
++    }
++}
++
++- (BOOL)previewPanel:(QLPreviewPanel *)panel handleEvent:(NSEvent *)event
++{
++    if (event.type != NSEventTypeKeyDown || !self.enabled || !self.window) {
++        return NO;
++    }
++    switch (event.keyCode) {
++    case 123: // Left arrow.
++    case 124: // Right arrow.
++    case 125: // Down arrow.
++    case 126: // Up arrow.
++        [self.window sendEvent:event];
++        return YES;
++    default:
++        return NO;
++    }
++}
++
++- (NSInteger)numberOfPreviewItemsInPreviewPanel:(QLPreviewPanel *)panel
++{
++    return self.urls.count;
++}
++
++- (id<QLPreviewItem>)previewPanel:(QLPreviewPanel *)panel previewItemAtIndex:(NSInteger)index
++{
++    return self.urls[index];
++}
++@end
++
++namespace
++{
++bool requested = false;
++bool openingDeferred = false;
++quint64 requestGeneration = 0;
++QElapsedTimer lastExplicitClose;
++const QWidget *panelOwner = nullptr;
++
++DolphinQuickLookSource *activeSource = nil;
++NSMutableArray<DolphinQuickLookSource *> *retiredSources = nil;
++
++DolphinQuickLookSource *source()
++{
++    return activeSource;
++}
++
++void discardReleasedSources()
++{
++    QLPreviewPanel *panel = [QLPreviewPanel sharedPreviewPanelExists] ? [QLPreviewPanel sharedPreviewPanel] : nil;
++    for (DolphinQuickLookSource *controller in [retiredSources copy]) {
++        if (panel.currentController != controller && panel.dataSource != controller && panel.delegate != controller) {
++            [retiredSources removeObject:controller];
++        }
++    }
++}
++
++NSArray<NSURL *> *toNSUrls(const QList<QUrl> &files)
++{
++    NSMutableArray<NSURL *> *urls = [NSMutableArray arrayWithCapacity:files.size()];
++    for (const QUrl &file : files) {
++        if (file.isLocalFile()) {
++            [urls addObject:[NSURL fileURLWithPath:file.toLocalFile().toNSString()]];
++        }
++    }
++    return urls;
++}
++
++void detachResponder()
++{
++    DolphinQuickLookSource *controller = source();
++    NSWindow *window = controller.window;
++    if (window && window.nextResponder == controller) {
++        window.nextResponder = controller.previousResponder;
++    }
++    controller.window = nil;
++    controller.previousResponder = nil;
++    controller.nextResponder = nil;
++}
++
++void releaseController(bool hidePanel)
++{
++    DolphinQuickLookSource *controller = source();
++    if (!controller) {
++        return;
++    }
++    controller.enabled = NO;
++    detachResponder();
++    if ([QLPreviewPanel sharedPreviewPanelExists]) {
++        QLPreviewPanel *panel = [QLPreviewPanel sharedPreviewPanel];
++        if (panel.currentController == controller) {
++            if (hidePanel) {
++                lastExplicitClose.start();
++                [panel orderOut:nil];
++            }
++            [panel updateController];
++            // AppKit can retain the controller while its hidden panel is inactive.
++            if (panel.dataSource == controller || panel.delegate == controller) {
++                [controller endPreviewPanelControl:panel];
++            }
++        }
++    }
++    controller.urls = nil;
++    if (!retiredSources) {
++        retiredSources = [NSMutableArray array];
++    }
++    [retiredSources addObject:controller];
++    activeSource = nil;
++    discardReleasedSources();
++    requested = false;
++    openingDeferred = false;
++    ++requestGeneration;
++    panelOwner = nullptr;
++}
++}
++
++bool DolphinQuickLook::isVisible(const QWidget *owner)
++{
++    return requested && panelOwner == owner
++        && (openingDeferred || ([QLPreviewPanel sharedPreviewPanelExists] && [QLPreviewPanel sharedPreviewPanel].visible));
++}
++
++void DolphinQuickLook::show(const QList<QUrl> &files, QWidget *owner)
++{
++    NSArray<NSURL *> *urls = toNSUrls(files);
++    if (urls.count == 0 || !owner) {
++        return;
++    }
++    if (panelOwner) {
++        // Keep the panel visible while changing windows to avoid a hide/show race.
++        releaseController(false);
++    }
++    NSView *view = (__bridge NSView *)reinterpret_cast<void *>(owner->window()->winId());
++    NSWindow *window = view.window;
++    if (!window) {
++        return;
++    }
++    discardReleasedSources();
++    activeSource = [[DolphinQuickLookSource alloc] init];
++    DolphinQuickLookSource *controller = source();
++    controller.urls = urls;
++    controller.enabled = YES;
++    controller.window = window;
++    controller.previousResponder = window.nextResponder;
++    controller.nextResponder = controller.previousResponder;
++    window.nextResponder = controller;
++    panelOwner = owner;
++    requested = true;
++    const auto generation = ++requestGeneration;
++    // Let a recent orderOut finish before reopening the same shared panel.
++    const qint64 remaining = lastExplicitClose.isValid() ? 450 - lastExplicitClose.elapsed() : 0;
++    auto openPanel = [owner, generation] {
++        if (!requested || panelOwner != owner || generation != requestGeneration) {
++            return;
++        }
++        if (openingDeferred && !NSApp.active) {
++            releaseController(true);
++            return;
++        }
++        openingDeferred = false;
++        lastExplicitClose.invalidate();
++        // Showing the panel asks AppKit to select a controller from the responder chain.
++        QLPreviewPanel *panel = [QLPreviewPanel sharedPreviewPanel];
++        [panel orderFront:nil];
++        [panel updateController];
++    };
++    if (remaining > 0) {
++        openingDeferred = true;
++        QTimer::singleShot(static_cast<int>(remaining), owner, openPanel);
++    } else {
++        openPanel();
++    }
++}
++
++void DolphinQuickLook::update(const QList<QUrl> &files, const QWidget *owner)
++{
++    if (!isVisible(owner)) {
++        return;
++    }
++    NSArray<NSURL *> *urls = toNSUrls(files);
++    if (urls.count == 0) {
++        close(owner);
++        return;
++    }
++    source().urls = urls;
++    QLPreviewPanel *panel = [QLPreviewPanel sharedPreviewPanel];
++    if (panel.currentController == source()) {
++        [panel reloadData];
++    }
++}
++
++void DolphinQuickLook::close(const QWidget *owner)
++{
++    if (panelOwner != owner) {
++        return;
++    }
++    releaseController(true);
++}

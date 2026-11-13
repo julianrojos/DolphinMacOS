@@ -207,15 +207,26 @@ class InstallationTests(unittest.TestCase):
         real = load()
         filenames = sorted({Path(line[len("+++ b/"):].strip()) for patch_file in real.patches
                             for line in patch_file.read_text().splitlines() if line.startswith("+++ b/")})
+        added_files = set()
+        for patch_file in real.patches:
+            lines = patch_file.read_text().splitlines()
+            added_files.update(Path(next_line[len("+++ b/"):].strip())
+                               for line, next_line in zip(lines, lines[1:])
+                               if line == "--- /dev/null" and next_line.startswith("+++ b/"))
         for filename in filenames:
+            source = real.source / filename
+            if not source.exists() and filename in added_files:
+                continue
             destination = self.settings.source / filename
             destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(real.source / filename, destination)
+            shutil.copy2(source, destination)
         self.copy_patches()
         return filenames
 
     def source_contents(self, filenames):
-        return {name: (self.settings.source / name).read_bytes() for name in filenames}
+        # Files that a patch adds are gone once it is reverted.
+        return {name: (self.settings.source / name).read_bytes() if (self.settings.source / name).exists() else None
+                for name in filenames}
 
     def test_patch_toggling_does_not_guess_direction(self):
         filenames = self.copy_patched_sources()
@@ -230,6 +241,22 @@ class InstallationTests(unittest.TestCase):
             self.assertNotEqual(modified[name], original[name])
         installer.ensure_patch(self.settings, True)
         self.assertEqual(self.source_contents(filenames), modified)
+
+    def test_clean_sources_without_patch_added_files_can_be_copied_and_patched(self):
+        filenames = self.copy_patched_sources()
+        installer.ensure_patch(self.settings, False)
+        clean = self.source_contents(filenames)
+        self.assertIsNone(clean[Path("src/quicklook_macos.mm")])
+        self.assertIsNone(clean[Path("src/quicklook_macos.h")])
+        original_settings = self.settings
+        self.settings = Settings(self.root / "clean-copy", original_settings.version)
+        with patch(f"{__name__}.load", return_value=original_settings):
+            self.assertEqual(self.copy_patched_sources(), filenames)
+        self.assertEqual(self.source_contents(filenames), clean)
+        installer.ensure_patch(self.settings, True)
+        self.assertIsNotNone(self.source_contents(filenames)[Path("src/quicklook_macos.mm")])
+        installer.ensure_patch(self.settings, False)
+        self.assertEqual(self.source_contents(filenames), clean)
 
     def test_old_row_patch_is_migrated_and_reverted(self):
         filenames = self.copy_patched_sources()
@@ -455,6 +482,22 @@ craft() {
             with self.assertRaisesRegex(RuntimeError, "deployment was stopped"):
                 installer.build_artifact(self.settings, self.store, True)
             save.assert_not_called()
+            self.assertFalse(any("--install" in call.args for call in run.call_args_list))
+
+    def test_quicklook_selection_check_is_not_skipped_with_session_test(self):
+        self.settings.patch_dir.mkdir(parents=True)
+        (self.settings.patch_dir / "0007-macos-quick-look.patch").touch()
+
+        def fail_quicklook(*args, **kwargs):
+            if str(args[1]).endswith("check-quicklook-selection.py"):
+                raise subprocess.CalledProcessError(1, args)
+
+        with patch.object(installer, "ensure_patch"), patch.object(installer, "run", side_effect=fail_quicklook) as run, \
+             patch.object(self.store, "save") as save:
+            with self.assertRaises(subprocess.CalledProcessError):
+                installer.build_artifact(self.settings, self.store, True, skip_session_test=True)
+            save.assert_not_called()
+            self.assertTrue(any(str(call.args[1]).endswith("comprobar-accesibilidad.py") for call in run.call_args_list))
             self.assertFalse(any("--install" in call.args for call in run.call_args_list))
 
     def test_cleanup_initial_migration_protects_every_existing_copy(self):
