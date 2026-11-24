@@ -136,8 +136,13 @@ def main():
         except BlockingIOError as error:
             raise RuntimeError("Another installation or cleanup is running") from error
         store = Store(settings.backups)
+        if args.recover:
+            ensure_closed(settings)
+            recover(settings.craft, store, state_path)
+            print("Recovered the previous KIO library")
+            return
         pending = state_path.parent / "pendiente.json"
-        if pending.exists() and not args.recover:
+        if pending.exists():
             raise RuntimeError("A KIO replacement was interrupted; run this command with --recover")
         state = checked_state(state_path, KIO_VERSION)
         try:
@@ -148,10 +153,6 @@ def main():
             print(f"Warning: {error}; the Open With filter was not installed. Adapt the patch before installing it.", file=sys.stderr)
             return
         ensure_closed(settings)
-        if args.recover:
-            recover(settings.craft, store, state_path)
-            print("Recovered the previous KIO library")
-            return
         if state:
             verify_current_library(settings, store, state)
         if args.restore:

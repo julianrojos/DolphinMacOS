@@ -91,6 +91,48 @@ class KioFilterTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "active KIO library"):
             kio_filter.verify_library_version(self.settings)
 
+    def interrupted_replacement(self, live_value):
+        """Leave an interrupted replacement while a newer KIO library is active."""
+        baseline = self.artifact("before", b"original")
+        target = self.artifact("target", b"filtered")
+        self.live = self.settings.craft / self.relative
+        self.live.parent.mkdir(parents=True)
+        self.live.write_bytes(live_value)
+        self.newer = self.live.parent / "libKF6KIOWidgets.6.32.0.dylib"
+        self.newer.write_bytes(b"newer")
+        self.alias = self.live.parent / "libKF6KIOWidgets.6.dylib"
+        self.alias.symlink_to(self.newer.name)
+        self.state = self.settings.backups / "kio-filter/installation.json"
+        self.pending = self.state.parent / "pendiente.json"
+        write_json(self.state, {"invalid": True})
+        write_json(self.pending, {"before": baseline, "target": target,
+                                  "managed": [self.relative], "prior_state": None})
+
+    def recover(self):
+        with mock.patch.object(kio_filter, "load", return_value=self.settings), \
+             mock.patch.object(kio_filter, "ensure_closed") as closed, \
+             mock.patch.object(sys, "argv", ["install-kio-filter.py", "--recover"]), \
+             contextlib.redirect_stdout(io.StringIO()):
+            kio_filter.main()
+        return closed
+
+    def test_recover_with_newer_active_library_restores_original(self):
+        self.interrupted_replacement(b"filtered")
+        closed = self.recover()
+        closed.assert_called_once()
+        self.assertEqual(self.live.read_bytes(), b"original")
+        self.assertEqual(self.newer.read_bytes(), b"newer")
+        self.assertEqual(self.alias.readlink(), Path(self.newer.name))
+        self.assertFalse(self.pending.exists())
+        self.assertFalse(self.state.exists())
+
+    def test_recover_keeps_pending_record_after_external_change(self):
+        self.interrupted_replacement(b"external change")
+        with self.assertRaisesRegex(RuntimeError, "cambio externo"):
+            self.recover()
+        self.assertTrue(self.pending.exists())
+        self.assertEqual(self.live.read_bytes(), b"external change")
+
 
 if __name__ == "__main__":
     unittest.main()
